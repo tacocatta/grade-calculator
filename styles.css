@@ -20,6 +20,7 @@
   --check: #9A7400;
   --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  --display: "Bricolage Grotesque", var(--font);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -75,10 +76,20 @@ button { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 10px;
+  padding-top: 14px;
 }
-.app-header h1 { font-size: 1rem; font-weight: 700; }
+.app-header h1 {
+  font-family: var(--display);
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
 .header-actions { display: flex; gap: 14px; }
+@media (max-width: 400px) {
+  .app-header h1 { font-size: 1.45rem; }
+  .header-actions { gap: 12px; font-size: 0.9rem; }
+}
 
 .link-btn, .add-btn {
   border: 0;
@@ -91,29 +102,33 @@ button { cursor: pointer; }
 
 .tabs {
   display: flex;
-  gap: 20px;
+  gap: 8px;
+  padding-top: 12px;
+  padding-bottom: 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
   flex: 0 0 auto;
-  padding: 10px 0 9px;
-  border: 0;
-  border-bottom: 3px solid transparent;
+  padding: 8px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
   background: none;
   color: var(--pencil);
+  font-family: var(--display);
   font-weight: 700;
+  font-size: 0.95rem;
   white-space: nowrap;
 }
-.tab:hover { color: var(--ink); }
-.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ball); }
-.tab:focus-visible { outline-offset: -2px; }
+.tab:hover { color: var(--ink); border-color: var(--pencil); }
+.tab[aria-selected="true"] { background: var(--ball); border-color: var(--ball); color: var(--paper); }
 
 main.wrap { padding-top: 24px; padding-bottom: 32px; }
 .panel[hidden] { display: none; }
 
-.course-head h2 { font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.01em; }
+.course-head h2 { font-family: var(--display); font-weight: 800; font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.02em; }
+.block > h3, .fold-title { font-family: var(--display); letter-spacing: -0.01em; }
 .course-note { color: var(--pencil); font-size: 0.9rem; margin-top: 4px; }
 
 /* ---------- Scorecard: the red-pen mark ---------- */
@@ -239,7 +254,23 @@ main.wrap { padding-top: 24px; padding-bottom: 32px; }
   align-items: end;
   gap: 4px 12px;
 }
-.entry-main .name { grid-area: name; }
+.entry-main .name-line, .entry-main .name.static { grid-area: name; }
+.name-line { display: flex; align-items: flex-end; gap: 10px; }
+.count-check {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0 0 8px;
+  accent-color: var(--ball);
+  cursor: pointer;
+}
+/* Unticked: greyed out and left out of every mark. The checkbox stays clear. */
+.entry.is-off .name-line .name,
+.entry.is-off .score,
+.entry.is-off .pct,
+.entry.is-off .cats,
+.entry.is-off .entry-meta > :not(.delete-btn) { opacity: 0.4; }
+.entry.is-off .name-line .name { text-decoration: line-through; }
 .entry-main .score { grid-area: score; }
 .entry-main .pct { grid-area: pct; }
 @media (min-width: 560px) {

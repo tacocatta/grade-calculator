@@ -1,6 +1,6 @@
 /*
- * Grade calculation logic. No DOM code lives here, so the same file is used by
- * the website (window.GradeCalc) and by the tests in Node (require).
+ * Grade calculation logic, kept separate from the page code (app.js).
+ * Exposed as window.GradeCalc in the browser (and module.exports in Node).
  *
  * Rules:
  *  - An assessment's percentage is score / outOf * 100.
@@ -88,8 +88,9 @@
     return total > 0 ? sum / total : null;
   }
 
+  /** Unticked ("disabled") entries never count; predicted ones count only with predictions on. */
   function isIncluded(entry, includePredicted) {
-    return !!entry && (!entry.predicted || !!includePredicted);
+    return !!entry && !entry.disabled && (!entry.predicted || !!includePredicted);
   }
 
   /** Default weights for a course merged with the user's settings. */
@@ -230,20 +231,25 @@
 
   /**
    * Reverse solver.
-   * opts = {parts: [{id, weight, value}], target, ap, afterBoost}
-   * Exactly one part must have value null; that part is solved for.
+   * opts = {parts: [{id, weight, value}], solveFor, target, ap, afterBoost}
+   * The part named by solveFor is solved for. Any other part with value null
+   * (no mark yet) is left out and the remaining weights are rescaled, the same
+   * way the current mark is worked out.
    * Returns {ok:false, error} or
-   *         {ok:true, id, required, atLeast, status: 'ok'|'too-high'|'too-low'|'any'}.
+   *         {ok:true, id, required, atLeast, leftOut, status: 'ok'|'too-high'|'too-low'|'any'}.
    */
   function solve(opts) {
     var target = toNumber(opts.target);
     if (target == null) return { ok: false, error: 'no-target' };
     if (target < 0 || target > 100) return { ok: false, error: 'target-range' };
 
-    var blanks = opts.parts.filter(function (p) { return p.value == null; });
-    if (blanks.length !== 1) return { ok: false, error: 'blank-count' };
-    var blank = blanks[0];
+    var blank = null;
+    opts.parts.forEach(function (p) { if (p.id === opts.solveFor) blank = p; });
+    if (!blank) return { ok: false, error: 'no-solve-for' };
     if (!(blank.weight > 0)) return { ok: false, error: 'zero-weight' };
+    var leftOut = opts.parts.filter(function (p) { return p !== blank && p.value == null; })
+      .map(function (p) { return p.id; });
+    var used = opts.parts.filter(function (p) { return p === blank || p.value != null; });
 
     var preTarget = target, atLeast = false;
     if (opts.ap && opts.afterBoost) {
@@ -257,7 +263,7 @@
     }
 
     var totalWeight = 0, known = 0;
-    opts.parts.forEach(function (p) {
+    used.forEach(function (p) {
       totalWeight += p.weight;
       if (p !== blank) known += p.value * p.weight;
     });
@@ -266,7 +272,7 @@
     var status = 'ok';
     if (required > 100 + EPS) status = 'too-high';
     else if (required < -EPS) status = atLeast ? 'any' : 'too-low';
-    return { ok: true, id: blank.id, required: required, atLeast: atLeast, preTarget: preTarget, status: status };
+    return { ok: true, id: blank.id, required: required, atLeast: atLeast, preTarget: preTarget, leftOut: leftOut, status: status };
   }
 
   /** Display helpers: the only places rounding happens. */

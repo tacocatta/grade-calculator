@@ -50,7 +50,7 @@
   function blankMark() { return { score: '', outOf: '' }; }
 
   function newAssessment(cid, type) {
-    var a = { id: uid(), name: '', type: type || 'test', weight: '', predicted: false };
+    var a = { id: uid(), name: '', type: type || 'test', weight: '', predicted: false, disabled: false };
     if (GC.COURSES[cid].categories) {
       a.marks = {};
       GC.CATEGORY_ORDER.forEach(function (k) { a.marks[k] = blankMark(); });
@@ -84,6 +84,7 @@
     a.type = typeExists(cid, settings, raw.type) ? raw.type : 'test';
     a.weight = str(raw.weight);
     a.predicted = !!raw.predicted;
+    a.disabled = !!raw.disabled;
     if (def.categories) {
       GC.CATEGORY_ORDER.forEach(function (k) {
         var m = isObj(raw.marks) && isObj(raw.marks[k]) ? raw.marks[k] : {};
@@ -125,7 +126,7 @@
     }
     if (Array.isArray(raw.cpt)) {
       c.cpt = raw.cpt.filter(isObj).map(function (e) {
-        return { id: e.id ? String(e.id) : uid(), name: str(e.name), score: str(e.score), outOf: str(e.outOf), predicted: !!e.predicted };
+        return { id: e.id ? String(e.id) : uid(), name: str(e.name), score: str(e.score), outOf: str(e.outOf), predicted: !!e.predicted, disabled: !!e.disabled };
       });
     }
     ['final', 'attendance'].forEach(function (slot) {
@@ -166,8 +167,8 @@
   function typesFor(cid) { return GC.typeList(cid, state.courses[cid].settings); }
 
   function hasPredicted(c) {
-    return c.assessments.some(function (a) { return a.predicted; }) ||
-      c.cpt.some(function (e) { return e.predicted; }) ||
+    return c.assessments.some(function (a) { return a.predicted && !a.disabled; }) ||
+      c.cpt.some(function (e) { return e.predicted && !e.disabled; }) ||
       c.final.predicted || c.attendance.predicted;
   }
 
@@ -242,7 +243,8 @@
         '<button type="button" class="add-btn" data-action="add-cpt">+ Add CPT mark</button></section>';
     }
 
-    html += '<section class="block"><h3>Final exam and attendance</h3><div class="rows">' +
+    html += '<section class="block"><h3>Final exam and attendance</h3>' +
+      '<p class="hint">Leave these blank if you don\'t know the mark yet. They\'re left out until you fill them in.</p><div class="rows">' +
       singleHtml('final', 'Final exam') + singleHtml('attendance', 'Attendance & Participation') + '</div></section>';
 
     html += '<details class="block fold"><summary><span class="fold-title">Reverse solver</span>' +
@@ -265,6 +267,15 @@
       numInput(prefix + 'outOf', m.outOf, label + ' out of', 'out of') + '</span>';
   }
 
+  /** Count checkbox + name input; unticking leaves the entry out of every mark. */
+  function nameLine(obj, placeholder, label, context) {
+    return '<div class="name-line">' +
+      '<input type="checkbox" class="count-check" data-field="counted"' + (obj.disabled ? '' : ' checked') +
+      ' aria-label="Count ' + esc(context) + ' in my mark" title="Count this in my mark">' +
+      '<input type="text" class="blank name" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
+      ' aria-label="' + label + '" autocomplete="off"></div>';
+  }
+
   function predictedToggle(on) {
     return '<label class="check"><input type="checkbox" data-field="predicted"' + (on ? ' checked' : '') + '> Predicted</label>';
   }
@@ -279,8 +290,7 @@
     var typeWeight = w.types[a.type] != null ? plainNum(w.types[a.type]) : '0';
 
     var html = '<div class="entry' + (a.predicted ? ' is-predicted' : '') + (def.categories ? ' has-cats' : '') + '" data-kind="assessment" data-id="' + esc(a.id) + '">';
-    html += '<div class="entry-main">' +
-      '<input type="text" class="blank name" data-field="name" value="' + esc(a.name) + '" placeholder="Untitled assessment" aria-label="Assessment name" autocomplete="off">';
+    html += '<div class="entry-main">' + nameLine(a, 'Untitled assessment', 'Assessment name', context);
     if (def.categories) {
       html += '</div><div class="cats">' + GC.CATEGORY_ORDER.map(function (k) {
         return '<div class="cat-row"><span class="cat" title="' + GC.CATEGORY_LABELS[k] + '">' + k + '</span>' +
@@ -304,7 +314,7 @@
   function cptHtml(e, index) {
     var context = e.name ? e.name : 'CPT mark ' + (index + 1);
     return '<div class="entry' + (e.predicted ? ' is-predicted' : '') + '" data-kind="cpt" data-id="' + esc(e.id) + '">' +
-      '<div class="entry-main"><input type="text" class="blank name" data-field="name" value="' + esc(e.name) + '" placeholder="Untitled CPT mark" aria-label="CPT mark name" autocomplete="off">' +
+      '<div class="entry-main">' + nameLine(e, 'Untitled CPT mark', 'CPT mark name', context) +
       scoreHtml('', e, context) + '<span class="pct" data-pct=""></span></div>' +
       '<div class="entry-meta">' + predictedToggle(e.predicted) +
       '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button></div></div>';
@@ -357,7 +367,8 @@
   function updateEntry(cid, el) {
     var obj = findEntry(cid, el);
     if (!obj) return;
-    el.classList.toggle('is-predicted', !!obj.predicted);
+    el.classList.toggle('is-predicted', !!obj.predicted && !obj.disabled);
+    el.classList.toggle('is-off', !!obj.disabled);
     each(el.querySelectorAll('.pct'), function (span) {
       var cat = span.getAttribute('data-pct');
       var m = cat ? obj.marks[cat] : obj;
@@ -455,7 +466,8 @@
     var def = GC.COURSES[cid];
     var s = solverState[cid];
     var html = '<p class="hint">Enter a course mark, then pick the part to solve for. ' +
-      'The other parts use your current real marks (shown in grey) unless you type over them.</p>' +
+      'The other parts use your current real marks (shown in grey) unless you type over them. ' +
+      'Parts with no mark yet, like a final exam you haven\'t written, are left out.</p>' +
       '<label class="field"><span class="field-label">Course mark you want (%)</span>' +
       '<input type="text" inputmode="decimal" autocomplete="off" class="blank num wide" data-solver="target" value="' + esc(s.target) + '" placeholder="e.g. 90"></label>';
     if (def.ap) {
@@ -487,7 +499,7 @@
       var input = box.querySelector('[data-part="' + p + '"]');
       var solving = s.solveFor === p;
       input.disabled = solving;
-      input.placeholder = solving ? '?' : (current.parts[p] == null ? '%' : GC.format2(current.parts[p]));
+      input.placeholder = solving ? '?' : (current.parts[p] == null ? 'left out' : GC.format2(current.parts[p]));
       var typed = str(s.values[p]).trim();
       input.classList.toggle('invalid', !solving && typed !== '' && GC.toNumber(typed) == null);
       box.querySelector('[data-solver-weight="' + p + '"]').textContent = plainNum(w.components[p]) + '%';
@@ -499,7 +511,7 @@
 
     function fail(msg) { out.className = 'solver-result bad'; out.innerHTML = msg; }
 
-    var missing = [], invalid = [];
+    var invalid = [];
     var parts = def.parts.map(function (p) {
       var value = null;
       if (p !== s.solveFor) {
@@ -508,18 +520,14 @@
           value = GC.toNumber(typed);
           if (value == null) invalid.push(GC.PART_LABELS[p]);
         } else {
-          value = current.parts[p];
-          if (value == null) missing.push(GC.PART_LABELS[p]);
+          value = current.parts[p]; // null = no mark yet, so it's left out
         }
       }
       return { id: p, weight: w.components[p], value: value };
     });
     if (invalid.length) return fail('Enter a number for ' + esc(invalid.join(', ')) + '.');
-    if (missing.length) {
-      return fail('There\'s no mark for ' + esc(missing.join(', ')) + ' yet. Type one in, or solve for that part instead. Only one part can be unknown.');
-    }
 
-    var r = GC.solve({ parts: parts, target: s.target, ap: def.ap, afterBoost: def.ap && s.afterBoost });
+    var r = GC.solve({ parts: parts, solveFor: s.solveFor, target: s.target, ap: def.ap, afterBoost: def.ap && s.afterBoost });
     if (!r.ok) {
       if (r.error === 'target-range' || r.error === 'no-target') return fail('Enter a course mark from 0 to 100.');
       if (r.error === 'zero-weight') return fail(esc(GC.PART_LABELS[s.solveFor]) + ' has a weight of 0%, so it can\'t change your mark.');
@@ -528,18 +536,22 @@
 
     var label = SOLVE_PHRASE[r.id];
     var targetText = GC.format2(GC.toNumber(s.target)) + '%' + (def.ap ? (s.afterBoost ? ' after the boost' : ' before the boost') : '');
+    var leftOutNote = r.leftOut.length
+      ? '<span class="solver-note">Left out because there\'s no mark yet: ' +
+        esc(r.leftOut.map(function (p) { return GC.PART_LABELS[p]; }).join(', ')) + '.</span>'
+      : '';
 
     if (r.status === 'too-high') {
       return fail('<strong>Not possible.</strong> You\'d need <span class="need">' + pct(r.required) + '</span> on ' + label +
-        ', which is above 100%.');
+        ', which is above 100%.' + leftOutNote);
     }
     if (r.status === 'too-low') {
       return fail('<strong>Not possible.</strong> You\'d need <span class="need">' + pct(r.required) + '</span> on ' + label +
-        ', which is below 0%. Even 0% gets you more than ' + targetText + '.');
+        ', which is below 0%. Even 0% gets you more than ' + targetText + '.' + leftOutNote);
     }
     out.className = 'solver-result ok';
     if (r.status === 'any') {
-      out.innerHTML = 'Any mark on ' + label + ' works. Your other marks already give you 100% after the boost.';
+      out.innerHTML = 'Any mark on ' + label + ' works. Your other marks already give you 100% after the boost.' + leftOutNote;
       return;
     }
     var html = 'You need ' + (r.atLeast ? 'at least ' : '') + '<span class="need">' + pct(r.required) + '</span> on ' + label +
@@ -554,7 +566,7 @@
         ? '<span class="solver-note">Any mark of ' + pct(r.preTarget) + ' or more before the boost becomes 100%.</span>'
         : '<span class="solver-note">' + targetText + ' is ' + pct(r.preTarget) + ' before the boost.</span>';
     }
-    out.innerHTML = html;
+    out.innerHTML = html + leftOutNote;
   }
 
   // -------------------------------------------------------------- settings
@@ -710,7 +722,8 @@
     if (!entryEl || !field) return;
     var obj = findEntry(cid, entryEl);
     if (!obj) return;
-    setField(obj, field, t.type === 'checkbox' ? t.checked : t.value);
+    if (field === 'counted') obj.disabled = !t.checked;
+    else setField(obj, field, t.type === 'checkbox' ? t.checked : t.value);
     save();
     if (field === 'type') {
       // Show the new type's weight as the hint in the weight box.
@@ -763,7 +776,7 @@
     }
 
     if (action === 'add-cpt') {
-      c.cpt.push({ id: uid(), name: '', score: '', outOf: '', predicted: false });
+      c.cpt.push({ id: uid(), name: '', score: '', outOf: '', predicted: false, disabled: false });
       save();
       renderCpt(cid);
       refresh(cid);
