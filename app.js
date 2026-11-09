@@ -169,26 +169,61 @@
         });
       }
 
-      merge('assessments', 'a:', function (d) {
-        var a = newAssessment(cid, typeExists(cid, c.settings, d.type) ? d.type : 'test');
-        a.name = str(d.name).trim();
-        if (d.weight != null) a.weight = str(d.weight);
-        if (def.categories) {
-          if (isObj(d.outOf)) {
-            GC.CATEGORY_ORDER.forEach(function (k) { if (d.outOf[k] != null) a.marks[k].outOf = str(d.outOf[k]); });
-          }
-        } else if (d.outOf != null) {
-          a.outOf = str(d.outOf);
-        }
-        return a;
-      });
-      if (def.parts.indexOf('cpt') !== -1) {
-        merge('cpt', 'c:', function (d) {
-          return { id: uid(), name: str(d.name).trim(), score: '', outOf: str(d.outOf), predicted: false, disabled: false };
-        });
-      }
+      merge('assessments', 'a:', function (d) { return makeDefaultAssessment(cid, d); });
+      if (def.parts.indexOf('cpt') !== -1) merge('cpt', 'c:', makeDefaultCpt);
     });
     return changed;
+  }
+
+  function nameKey(name) { return str(name).trim().toLowerCase(); }
+
+  function makeDefaultAssessment(cid, d) {
+    var c = state.courses[cid];
+    var a = newAssessment(cid, typeExists(cid, c.settings, d.type) ? d.type : 'test');
+    a.name = str(d.name).trim();
+    if (d.weight != null) a.weight = str(d.weight);
+    if (GC.COURSES[cid].categories) {
+      if (isObj(d.outOf)) {
+        GC.CATEGORY_ORDER.forEach(function (k) { if (d.outOf[k] != null) a.marks[k].outOf = str(d.outOf[k]); });
+      }
+    } else if (d.outOf != null) {
+      a.outOf = str(d.outOf);
+    }
+    return a;
+  }
+
+  function makeDefaultCpt(d) {
+    return { id: uid(), name: str(d.name).trim(), score: '', outOf: str(d.outOf), predicted: false, disabled: false };
+  }
+
+  function courseDefaults(cid, listName) {
+    var defs = (window.COURSE_DEFAULTS || {})[cid];
+    var list = isObj(defs) && Array.isArray(defs[listName]) ? defs[listName] : [];
+    return list.filter(function (d) { return isObj(d) && nameKey(d.name); });
+  }
+
+  function hasDefaults(cid) {
+    return courseDefaults(cid, 'assessments').length + courseDefaults(cid, 'cpt').length > 0;
+  }
+
+  /**
+   * Clears the course's assessments (and CPT marks) and replaces them with the
+   * defaults from defaults.js, with blank scores. Final exam, attendance and
+   * weights are left alone. Returns how many defaults were added.
+   */
+  function restoreDefaults(cid) {
+    var c = state.courses[cid];
+    var assessments = courseDefaults(cid, 'assessments');
+    c.assessments = assessments.map(function (d) { return makeDefaultAssessment(cid, d); });
+    c.seenDefaults = assessments.map(function (d) { return 'a:' + nameKey(d.name); });
+    var count = assessments.length;
+    if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) {
+      var cpt = courseDefaults(cid, 'cpt');
+      c.cpt = cpt.map(makeDefaultCpt);
+      c.seenDefaults = c.seenDefaults.concat(cpt.map(function (d) { return 'c:' + nameKey(d.name); }));
+      count += cpt.length;
+    }
+    return count;
   }
 
   function normalizeState(raw) {
@@ -287,8 +322,10 @@
       html += '<p class="hint">Enter Knowledge (K), Thinking (T), Communication (C) and Application (A) separately. ' +
         'Leave a category blank if the assessment didn\'t test it.</p>';
     }
-    html += '<div class="rows" data-region="assessments"></div>' +
-      '<button type="button" class="add-btn" data-action="add-assessment">+ Add assessment</button></section>';
+    html += '<div class="rows" data-region="assessments"></div><div class="list-actions">' +
+      '<button type="button" class="add-btn" data-action="add-assessment">+ Add assessment</button>' +
+      (hasDefaults(cid) ? '<button type="button" class="link-btn quiet" data-action="restore-defaults">Restore default assessments</button>' : '') +
+      '</div></section>';
 
     if (def.parts.indexOf('cpt') !== -1) {
       html += '<section class="block"><h3>CPT</h3>' +
@@ -826,6 +863,20 @@
       renderAssessments(cid);
       refresh(cid);
       focusNew(region(cid, 'assessments'));
+      return;
+    }
+
+    if (action === 'restore-defaults') {
+      var hasCpt = GC.COURSES[cid].parts.indexOf('cpt') !== -1;
+      if (!confirm('Clear every assessment' + (hasCpt ? ' and CPT mark' : '') + ' in ' + GC.COURSES[cid].name +
+        ' and start again from the default list? All marks you entered for them will be deleted. ' +
+        'Your final exam, attendance and weights stay.')) return;
+      var restored = restoreDefaults(cid);
+      save();
+      renderAssessments(cid);
+      renderCpt(cid);
+      refresh(cid);
+      toast('Restored ' + restored + ' default assessment' + (restored === 1 ? '' : 's'));
       return;
     }
 
