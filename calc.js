@@ -5,6 +5,8 @@
  * Rules:
  *  - An assessment's percentage is score / outOf * 100.
  *  - Term mark = weighted average of assessment percentages, using type weights.
+ *    An assessment can override its type's weight with its own weight.
+ *    Users can add their own assessment types (settings.customTypes).
  *  - AP Physics: each K/T/C/A category is its own weighted average (blank marks
  *    are skipped for that category only); the term is the categories combined
  *    using their weights.
@@ -104,6 +106,11 @@
       return out;
     }
     var w = { components: merge('components'), types: merge('types') };
+    // User-added assessment types, e.g. {id: 'ct-x', label: 'Project', weight: '2'}.
+    customTypes(settings).forEach(function (ct) {
+      var n = toNumber(ct.weight);
+      w.types[ct.id] = n != null && n >= 0 ? n : 0;
+    });
     if (def.categories) {
       w.categories = merge('categories');
       // Physics: the term weight is always the sum of its category weights.
@@ -114,6 +121,30 @@
 
   function defaultWeights(courseId) {
     return effectiveWeights(courseId, {});
+  }
+
+  function customTypes(settings) {
+    var list = settings && Array.isArray(settings.customTypes) ? settings.customTypes : [];
+    return list.filter(function (ct) { return ct && ct.id; });
+  }
+
+  /** All assessment types for a course: built-in first, then the user's own. */
+  function typeList(courseId, settings) {
+    var w = effectiveWeights(courseId, settings);
+    var list = Object.keys(COURSES[courseId].types).map(function (id) {
+      return { id: id, label: TYPE_LABELS[id], weight: w.types[id], custom: false };
+    });
+    customTypes(settings).forEach(function (ct) {
+      list.push({ id: ct.id, label: String(ct.label || '').trim() || 'Untitled type', weight: w.types[ct.id], custom: true });
+    });
+    return list;
+  }
+
+  /** An assessment's own weight if set, otherwise its type's weight. Unknown types count 0. */
+  function assessmentWeight(a, weights) {
+    var own = toNumber(a.weight);
+    if (own != null && own >= 0) return own;
+    return weights.types[a.type] || 0;
   }
 
   function sumValues(obj) {
@@ -127,7 +158,7 @@
     var list = (assessments || []).filter(function (a) { return isIncluded(a, includePredicted); });
     if (!COURSES[courseId].categories) {
       var value = weightedAverage(list.map(function (a) {
-        return { value: percent(a.score, a.outOf), weight: weights.types[a.type] || 0 };
+        return { value: percent(a.score, a.outOf), weight: assessmentWeight(a, weights) };
       }));
       return { value: value, categories: null };
     }
@@ -135,7 +166,7 @@
     CATEGORY_ORDER.forEach(function (cat) {
       categories[cat] = weightedAverage(list.map(function (a) {
         var m = a.marks && a.marks[cat];
-        return { value: m ? percent(m.score, m.outOf) : null, weight: weights.types[a.type] || 0 };
+        return { value: m ? percent(m.score, m.outOf) : null, weight: assessmentWeight(a, weights) };
       }));
     });
     var term = weightedAverage(CATEGORY_ORDER.map(function (cat) {
@@ -262,6 +293,8 @@
     weightedAverage: weightedAverage,
     effectiveWeights: effectiveWeights,
     defaultWeights: defaultWeights,
+    typeList: typeList,
+    assessmentWeight: assessmentWeight,
     termMark: termMark,
     cptMark: cptMark,
     singleMark: singleMark,

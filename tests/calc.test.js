@@ -193,6 +193,46 @@
     eq(GC.termMark('calculus', [a('test', 80, 100), a('quiz', 10, 10)], w).value, 90);
   });
 
+  // ---------- Per-assessment weights ----------
+  // Quiz given its own weight 1 instead of 0.5: (80×1 + 100×1) / 2 = 90
+  test('Per-assessment weight overrides the type weight', function () {
+    var quiz = a('quiz', 10, 10); quiz.weight = '1';
+    eq(GC.termMark('calculus', [a('test', 80, 100), quiz], DEF.calculus).value, 90);
+  });
+  test('Blank per-assessment weight falls back to the type weight', function () {
+    var quiz = a('quiz', 10, 10); quiz.weight = '';
+    eq(GC.termMark('calculus', [a('test', 80, 100), quiz], DEF.calculus).value, 130 / 1.5);
+  });
+  // Weight 0 removes it: only the test (80) counts
+  test('Per-assessment weight of 0 leaves that assessment out', function () {
+    var quiz = a('quiz', 5, 10); quiz.weight = '0';
+    eq(GC.termMark('calculus', [a('test', 80, 100), quiz], DEF.calculus).value, 80);
+  });
+  // Physics test with own weight 2, quiz default 0.5, K only: K = (80×2 + 100×0.5) / 2.5 = 210/2.5 = 84
+  test('Per-assessment weight applies to every Physics category', function () {
+    var t1 = { type: 'test', weight: '2', marks: { K: m(8, 10) } };
+    var q1 = { type: 'quiz', marks: { K: m(10, 10) } };
+    eq(GC.termMark('physics', [t1, q1], DEF.physics).categories.K, 84);
+  });
+
+  // ---------- Custom assessment types ----------
+  // Project weight 2: test 70 + project 85 → (70×1 + 85×2) / 3 = 240/3 = 80
+  test('Custom type uses its own weight', function () {
+    var settings = { customTypes: [{ id: 'ct-1', label: 'Project', weight: '2' }] };
+    var w = GC.effectiveWeights('advfunctions', settings);
+    eq(w.types['ct-1'], 2);
+    eq(GC.termMark('advfunctions', [a('test', 70, 100), a('ct-1', 85, 100)], w).value, 80);
+  });
+  test('Type list shows built-in types first, then custom ones', function () {
+    var list = GC.typeList('calculus', { customTypes: [{ id: 'ct-1', label: ' Homework ', weight: '0.2' }, { id: 'ct-2', label: '', weight: 'x' }] });
+    eq(list.map(function (t) { return t.label; }).join(','), 'Test,Quiz,Homework,Untitled type');
+    eq(list[2].weight, 0.2);
+    eq(list[3].weight, 0, 'invalid custom weight counts 0');
+  });
+  test('An assessment with an unknown type counts 0', function () {
+    eq(GC.termMark('calculus', [a('test', 80, 100), a('gone', 0, 100)], DEF.calculus).value, 80);
+  });
+
   // ---------- Reverse solver ----------
   function parts(term, final, attendance) {
     return [
