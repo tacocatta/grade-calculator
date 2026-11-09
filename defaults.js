@@ -1,0 +1,61 @@
+/*
+ * Default assessments: everyone using the site gets these, with the score left
+ * blank for them to fill in.
+ *
+ * HOW TO ADD ONE
+ *   1. Add a line to the right course below, for example:
+ *        { name: 'Unit 4 Test', type: 'test', outOf: 30 },
+ *   2. Commit and push. Everyone gets it the next time they open the site,
+ *      added to the end of their list. People who already have it don't get a copy.
+ *
+ * FIELDS
+ *   name    What it's called. Must be unique within the course.
+ *   type    'test' or 'quiz' in every course
+ *           'lab'   AP Physics only
+ *           'group' Group Assignment (Advanced Functions and Data Management only)
+ *   outOf   What it's marked out of.
+ *           AP Physics: one per category, e.g. outOf: { K: 10, T: 20, C: 5, A: 10 }
+ *           (leave out a category the assessment doesn't test).
+ *   weight  Optional. Gives this one assessment its own weight instead of its type's.
+ *
+ * DON'T rename or remove an entry once it's pushed. The name is how the site
+ * knows who already has it, so a renamed entry shows up again as a new one.
+ * (If someone deletes an entry from their own list, it doesn't come back.)
+ *
+ * Data Management CPT marks go in `cpt` the same way: { name: 'Proposal', outOf: 20 }
+ */
+window.COURSE_DEFAULTS = {
+  physics: {
+    assessments: [
+    ]
+  },
+
+  calculus: {
+    assessments: [
+      { name: 'Chapter 1 Precalculus Assignment', type: 'quiz', outOf: 20 },
+      { name: 'Chapter 2 Test', type: 'test', outOf: 38 },
+      { name: 'Chapter 3 Quiz', type: 'quiz', outOf: 21 },
+      { name: 'Chapter 3 Test', type: 'test', outOf: 40 },
+      { name: 'Chapter 4 Test', type: 'test', outOf: 37 },
+      { name: 'Chapter 5 Quiz', type: 'quiz', outOf: 20 },
+    ]
+  },
+
+  advfunctions: {
+    assessments: [
+    ]
+  },
+
+  datamgmt: {
+    assessments: [
+      { name: 'Unit 1 Test', type: 'test', outOf: 33 },
+      { name: 'Unit 2 Quiz', type: 'quiz', outOf: 18 },
+      { name: 'Password Probability', type: 'group', outOf: 25 },
+      { name: 'Unit 2 Test', type: 'test', outOf: 30 },
+      { name: 'Unit 3 Quiz', type: 'quiz', outOf: 17 },
+      { name: 'Unit 3 Test', type: 'test', outOf: 30 },
+    ],
+    cpt: [
+    ]
+  }
+};

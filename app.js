@@ -20,6 +20,7 @@
   GC.COURSE_ORDER.forEach(function (cid) {
     solverState[cid] = { target: '', afterBoost: false, solveFor: 'final', values: {} };
   });
+  if (applyDefaults(state)) save();
 
   // ---------------------------------------------------------------- helpers
 
@@ -134,7 +135,60 @@
         c[slot] = { score: str(raw[slot].score), outOf: str(raw[slot].outOf), predicted: !!raw[slot].predicted };
       }
     });
+    if (Array.isArray(raw.seenDefaults)) c.seenDefaults = raw.seenDefaults.map(str);
     return c;
+  }
+
+  /*
+   * Adds any default assessments (defaults.js) this person hasn't received yet.
+   * Each default is remembered by name in seenDefaults, so it's added once and
+   * never comes back after being deleted. A default whose name is already in
+   * the list (e.g. typed in by hand) is not added again.
+   */
+  function applyDefaults(s) {
+    var all = window.COURSE_DEFAULTS || {};
+    var changed = false;
+    function key(name) { return str(name).trim().toLowerCase(); }
+
+    GC.COURSE_ORDER.forEach(function (cid) {
+      var defs = all[cid];
+      if (!isObj(defs)) return;
+      var c = s.courses[cid];
+      var def = GC.COURSES[cid];
+      c.seenDefaults = c.seenDefaults || [];
+
+      function merge(listName, prefix, make) {
+        (Array.isArray(defs[listName]) ? defs[listName] : []).forEach(function (d) {
+          if (!isObj(d) || !key(d.name)) return;
+          var k = prefix + key(d.name);
+          if (c.seenDefaults.indexOf(k) !== -1) return;
+          c.seenDefaults.push(k);
+          changed = true;
+          var exists = c[listName].some(function (x) { return key(x.name) === key(d.name); });
+          if (!exists) c[listName].push(make(d));
+        });
+      }
+
+      merge('assessments', 'a:', function (d) {
+        var a = newAssessment(cid, typeExists(cid, c.settings, d.type) ? d.type : 'test');
+        a.name = str(d.name).trim();
+        if (d.weight != null) a.weight = str(d.weight);
+        if (def.categories) {
+          if (isObj(d.outOf)) {
+            GC.CATEGORY_ORDER.forEach(function (k) { if (d.outOf[k] != null) a.marks[k].outOf = str(d.outOf[k]); });
+          }
+        } else if (d.outOf != null) {
+          a.outOf = str(d.outOf);
+        }
+        return a;
+      });
+      if (def.parts.indexOf('cpt') !== -1) {
+        merge('cpt', 'c:', function (d) {
+          return { id: uid(), name: str(d.name).trim(), score: '', outOf: str(d.outOf), predicted: false, disabled: false };
+        });
+      }
+    });
+    return changed;
   }
 
   function normalizeState(raw) {
@@ -885,6 +939,7 @@
       }
       if (!confirm('Replace all marks on this device with the marks in this backup?')) return;
       state = normalizeState({ active: state.active, courses: parsed.courses });
+      applyDefaults(state);
       save();
       renderAll();
       toast('Backup imported');
