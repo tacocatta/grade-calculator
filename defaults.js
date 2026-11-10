@@ -46,6 +46,13 @@ window.COURSE_DEFAULTS = {
 
   advfunctions: {
     assessments: [
+      { name: 'Unit 1 Quiz', type: 'quiz', outOf: 18 },
+      { name: 'Unit 1 Test', type: 'test', outOf: 34 },
+      { name: 'Unit 2 Quiz', type: 'quiz', outOf: 20 },
+      { name: 'Unit 2 Test', type: 'test', outOf: 30 },
+      { name: 'Unit 3 Quiz', type: 'quiz', outOf: 31 },
+      { name: 'Unit 3 Test', type: 'test', outOf: 33 },
+      { name: 'Unit 1-3 GC', type: 'quiz', outOf: 20 },
     ]
   },
 
