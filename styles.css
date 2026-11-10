@@ -129,7 +129,6 @@ main.wrap { padding-top: 24px; padding-bottom: 32px; }
 
 .course-head h2 { font-family: var(--display); font-weight: 800; font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.02em; }
 .block > h3, .fold-title { font-family: var(--display); letter-spacing: -0.01em; }
-.course-note { color: var(--pencil); font-size: 0.9rem; margin-top: 4px; }
 
 /* ---------- Scorecard: the red-pen mark ---------- */
 

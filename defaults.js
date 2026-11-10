@@ -27,6 +27,9 @@
 window.COURSE_DEFAULTS = {
   physics: {
     assessments: [
+      { name: 'Unit 1 Quiz', type: 'quiz', outOf: { K: 15, T: 15 } },
+      { name: 'Unit 1 Test', type: 'test', outOf: { K: 20, T: 20, C: 10, A: 10 } },
+      { name: 'Unit 1 Lab', type: 'lab', outOf: { K: 5, T: 5, C: 5, A: 5 } },
     ]
   },
 

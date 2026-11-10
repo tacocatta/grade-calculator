@@ -20,7 +20,13 @@
   GC.COURSE_ORDER.forEach(function (cid) {
     solverState[cid] = { target: '', afterBoost: false, solveFor: 'final', values: {} };
   });
-  if (applyDefaults(state)) save();
+  // Returning visitors get told when new defaults show up; first-time visitors don't.
+  var returning = GC.COURSE_ORDER.some(function (cid) {
+    var c = state.courses[cid];
+    return (c.seenDefaults && c.seenDefaults.length) || c.assessments.length;
+  });
+  var newDefaults = {};
+  if (applyDefaults(state, newDefaults)) save();
 
   // ---------------------------------------------------------------- helpers
 
@@ -39,11 +45,11 @@
   function each(list, fn) { Array.prototype.forEach.call(list, fn); }
 
   var toastTimer;
-  function toast(msg) {
+  function toast(msg, ms) {
     toastEl.textContent = msg;
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, ms || 2600);
   }
 
   // ------------------------------------------------------------ data model
@@ -144,8 +150,9 @@
    * Each default is remembered by name in seenDefaults, so it's added once and
    * never comes back after being deleted. A default whose name is already in
    * the list (e.g. typed in by hand) is not added again.
+   * If `added` is given, it's filled with how many were added per course.
    */
-  function applyDefaults(s) {
+  function applyDefaults(s, added) {
     var all = window.COURSE_DEFAULTS || {};
     var changed = false;
     function key(name) { return str(name).trim().toLowerCase(); }
@@ -165,7 +172,10 @@
           c.seenDefaults.push(k);
           changed = true;
           var exists = c[listName].some(function (x) { return key(x.name) === key(d.name); });
-          if (!exists) c[listName].push(make(d));
+          if (!exists) {
+            c[listName].push(make(d));
+            if (added) added[cid] = (added[cid] || 0) + 1;
+          }
         });
       }
 
@@ -313,8 +323,7 @@
     var def = GC.COURSES[cid];
     var html = '<section class="panel" id="panel-' + cid + '" role="tabpanel" aria-labelledby="course-title-' + cid + '" data-course="' + cid + '"' +
       (cid === state.active ? '' : ' hidden') + '>';
-    html += '<div class="course-head"><h2 id="course-title-' + cid + '">' + esc(def.name) + '</h2>' +
-      (def.ap ? '<p class="course-note">AP course: your mark gets a 5% boost, up to 100%.</p>' : '') + '</div>';
+    html += '<div class="course-head"><h2 id="course-title-' + cid + '">' + esc(def.name) + '</h2></div>';
     html += '<div class="scorecard" data-region="results" aria-live="polite"></div>';
 
     html += '<section class="block"><h3>Assessments</h3>';
@@ -507,7 +516,6 @@
       html += '<div class="pen-mark" role="img" aria-label="Current mark ' + pct(cur.raw) + '">' +
         '<span class="pen-value">' + pct(cur.raw) + '</span></div>' +
         '<dl class="score-stats">' +
-        '<div><dt>Rounded</dt><dd>' + GC.roundWhole(cur.raw) + '%</dd></div>' +
         (def.ap ? '<div class="boost"><dt>AP boosted</dt><dd>' + pct(cur.boosted) + '</dd></div>' : '') +
         '</dl>';
     } else {
@@ -521,7 +529,6 @@
       var deltaText = delta == null ? '' : '<span class="delta">' + (delta >= 0 ? '+' : '−') + GC.format2(Math.abs(delta)) + '</span>';
       html += '<div class="what-if"><span class="what-if-label">With predicted marks</span>' +
         '<span class="what-if-value">' + pct(pred.raw) + '</span>' + deltaText +
-        '<span class="what-if-extra">Rounded ' + GC.roundWhole(pred.raw) + '%</span>' +
         (def.ap ? '<span class="what-if-extra">AP boosted ' + pct(pred.boosted) + '</span>' : '') + '</div>';
     } else if (!anyPred) {
       html += '<p class="what-if-hint">Tick Predicted on any entry to see a what-if mark.</p>';
@@ -671,7 +678,7 @@
     var def = GC.COURSES[cid];
     var saved = state.courses[cid].settings;
     function row(group, key, label, unit) {
-      var v = saved[group] && saved[group][key] != null ? saved[group][key] : String(def[group][key]);
+      var v = saved[group] && saved[group][key] != null ? saved[group][key] : plainNum(def[group][key]);
       var id = 'set-' + cid + '-' + group + '-' + key;
       return '<div class="setting-row"><label for="' + id + '">' + esc(label) + '</label>' +
         '<span class="unit-field">' + settingInput('data-setting="' + group + '" data-key="' + key + '"', v, label, id) +
@@ -1000,4 +1007,11 @@
   });
 
   renderAll();
+
+  if (returning) {
+    var addedText = GC.COURSE_ORDER.filter(function (cid) { return newDefaults[cid]; }).map(function (cid) {
+      return newDefaults[cid] + ' in ' + GC.COURSES[cid].shortName;
+    });
+    if (addedText.length) toast('New assessments added: ' + addedText.join(', ') + '. Your marks are unchanged.', 6000);
+  }
 })();

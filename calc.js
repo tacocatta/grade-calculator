@@ -30,7 +30,7 @@
       parts: ['term', 'final', 'attendance'],
       components: { term: 65, final: 25, attendance: 10 },
       categories: { K: 20, T: 25, C: 10, A: 10 },
-      types: { test: 1, quiz: 0.5, lab: 0.25 }
+      types: { test: 1, quiz: 0.5, lab: 5 / 6 }
     },
     calculus: {
       id: 'calculus', name: 'AP Calculus', shortName: 'AP Calc', ap: true,
