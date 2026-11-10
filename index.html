@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#FAFBFD" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#12161F" media="(prefers-color-scheme: dark)">
+  <title>Grade Calculator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Caveat:wght@600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="wrap header-row">
+      <h1>Grade Calculator</h1>
+      <div class="header-actions">
+        <button type="button" class="link-btn" data-action="export">Export</button>
+        <button type="button" class="link-btn" data-action="import">Import</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+    <nav class="wrap tabs" role="tablist" aria-label="Courses" id="tabs"></nav>
+  </header>
+
+  <main class="wrap" id="panels"></main>
+
+  <footer class="wrap app-footer">
+    <p>Your marks are saved on this device only. Export a backup to move them to another phone or computer.</p>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="calc.js"></script>
+  <!-- defaults.js is loaded by app.js, fresh every time. -->
+  <script src="app.js"></script>
+</body>
+</html>
