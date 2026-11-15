@@ -20,13 +20,6 @@
   GC.COURSE_ORDER.forEach(function (cid) {
     solverState[cid] = { target: '', afterBoost: false, solveFor: 'final', values: {} };
   });
-  // Returning visitors get told when new defaults show up; first-time visitors don't.
-  var returning = GC.COURSE_ORDER.some(function (cid) {
-    var c = state.courses[cid];
-    return (c.seenDefaults && c.seenDefaults.length) || c.assessments.length;
-  });
-  var newDefaults = {};
-  if (applyDefaults(state, newDefaults)) save();
 
   // ---------------------------------------------------------------- helpers
 
@@ -146,60 +139,85 @@
   }
 
   /*
-   * Adds any default assessments (defaults.js) this person hasn't received yet.
-   * Each default is remembered by name in seenDefaults, so it's added once and
-   * never comes back after being deleted. A default whose name is already in
-   * the list (e.g. typed in by hand) is not added again.
+   * Makes sure everyone has every default assessment (defaults.js), matched by
+   * name. A missing one is put back in its place among the other defaults.
+   * Defaults can't be deleted or renamed in the page, so this mostly adds new
+   * ones, but it also brings back any removed before that rule existed.
+   * Defaults people already have get their type and "out of" updated from
+   * defaults.js, so a correction there reaches everyone. Scores are never touched.
+   * seenDefaults records which defaults this person has had (used to tell
+   * returning visitors apart from first-time ones).
    * If `added` is given, it's filled with how many were added per course.
    */
   function applyDefaults(s, added) {
-    var all = window.COURSE_DEFAULTS || {};
     var changed = false;
-    function key(name) { return str(name).trim().toLowerCase(); }
 
     GC.COURSE_ORDER.forEach(function (cid) {
-      var defs = all[cid];
-      if (!isObj(defs)) return;
       var c = s.courses[cid];
-      var def = GC.COURSES[cid];
       c.seenDefaults = c.seenDefaults || [];
 
-      function merge(listName, prefix, make) {
-        (Array.isArray(defs[listName]) ? defs[listName] : []).forEach(function (d) {
-          if (!isObj(d) || !key(d.name)) return;
-          var k = prefix + key(d.name);
-          if (c.seenDefaults.indexOf(k) !== -1) return;
-          c.seenDefaults.push(k);
-          changed = true;
-          var exists = c[listName].some(function (x) { return key(x.name) === key(d.name); });
-          if (!exists) {
-            c[listName].push(make(d));
-            if (added) added[cid] = (added[cid] || 0) + 1;
+      function merge(listName, prefix, make, sync) {
+        var defs = courseDefaults(cid, listName);
+        defs.forEach(function (d, di) {
+          var k = nameKey(d.name);
+          if (c.seenDefaults.indexOf(prefix + k) === -1) {
+            c.seenDefaults.push(prefix + k);
+            changed = true;
           }
+          var have = c[listName];
+          var existing = have.find(function (x) { return nameKey(x.name) === k; });
+          if (existing) {
+            if (sync(existing, d)) changed = true;
+            return;
+          }
+          // Insert before the next default the person already has; otherwise at the end.
+          var later = defs.slice(di + 1).map(function (x) { return nameKey(x.name); });
+          var at = have.findIndex(function (x) { return later.indexOf(nameKey(x.name)) !== -1; });
+          have.splice(at === -1 ? have.length : at, 0, make(d));
+          changed = true;
+          if (added) added[cid] = (added[cid] || 0) + 1;
         });
       }
 
-      merge('assessments', 'a:', function (d) { return makeDefaultAssessment(cid, d); });
-      if (def.parts.indexOf('cpt') !== -1) merge('cpt', 'c:', makeDefaultCpt);
+      merge('assessments', 'a:',
+        function (d) { return makeDefaultAssessment(cid, c.settings, d); },
+        function (a, d) { return syncDefaultAssessment(cid, c.settings, a, d); });
+      if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) merge('cpt', 'c:', makeDefaultCpt, syncOutOf);
     });
     return changed;
   }
 
   function nameKey(name) { return str(name).trim().toLowerCase(); }
 
-  function makeDefaultAssessment(cid, d) {
-    var c = state.courses[cid];
-    var a = newAssessment(cid, typeExists(cid, c.settings, d.type) ? d.type : 'test');
+  function makeDefaultAssessment(cid, settings, d) {
+    var a = newAssessment(cid);
     a.name = str(d.name).trim();
     if (d.weight != null) a.weight = str(d.weight);
-    if (GC.COURSES[cid].categories) {
-      if (isObj(d.outOf)) {
-        GC.CATEGORY_ORDER.forEach(function (k) { if (d.outOf[k] != null) a.marks[k].outOf = str(d.outOf[k]); });
-      }
-    } else if (d.outOf != null) {
-      a.outOf = str(d.outOf);
-    }
+    syncDefaultAssessment(cid, settings, a, d);
     return a;
+  }
+
+  /** Sets a default assessment's type and "out of" from defaults.js. Returns true if anything changed. */
+  function syncDefaultAssessment(cid, settings, a, d) {
+    var changed = false;
+    var type = typeExists(cid, settings, d.type) ? d.type : 'test';
+    if (a.type !== type) { a.type = type; changed = true; }
+    if (GC.COURSES[cid].categories) {
+      // A category the default leaves out isn't tested, so its "out of" is blank.
+      GC.CATEGORY_ORDER.forEach(function (k) {
+        var want = isObj(d.outOf) && d.outOf[k] != null ? str(d.outOf[k]) : '';
+        if (a.marks[k].outOf !== want) { a.marks[k].outOf = want; changed = true; }
+      });
+      return changed;
+    }
+    return syncOutOf(a, d) || changed;
+  }
+
+  function syncOutOf(obj, d) {
+    var want = str(d.outOf);
+    if (obj.outOf === want) return false;
+    obj.outOf = want;
+    return true;
   }
 
   function makeDefaultCpt(d) {
@@ -210,6 +228,20 @@
     var defs = (window.COURSE_DEFAULTS || {})[cid];
     var list = isObj(defs) && Array.isArray(defs[listName]) ? defs[listName] : [];
     return list.filter(function (d) { return isObj(d) && nameKey(d.name); });
+  }
+
+  /**
+   * True if this entry is a course default (can't be deleted or renamed).
+   * If two entries share a default's name, only the first one counts.
+   */
+  function isDefaultEntry(cid, listName, obj) {
+    var k = nameKey(obj.name);
+    if (!k) return false;
+    var isDef = courseDefaults(cid, listName).some(function (d) { return nameKey(d.name) === k; });
+    if (!isDef) return false;
+    var list = state.courses[cid][listName];
+    for (var i = 0; i < list.length; i++) if (nameKey(list[i].name) === k) return list[i] === obj;
+    return false;
   }
 
   function hasDefaults(cid) {
@@ -224,7 +256,7 @@
   function restoreDefaults(cid) {
     var c = state.courses[cid];
     var assessments = courseDefaults(cid, 'assessments');
-    c.assessments = assessments.map(function (d) { return makeDefaultAssessment(cid, d); });
+    c.assessments = assessments.map(function (d) { return makeDefaultAssessment(cid, c.settings, d); });
     c.seenDefaults = assessments.map(function (d) { return 'a:' + nameKey(d.name); });
     var count = assessments.length;
     if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) {
@@ -333,7 +365,7 @@
     }
     html += '<div class="rows" data-region="assessments"></div><div class="list-actions">' +
       '<button type="button" class="add-btn" data-action="add-assessment">+ Add assessment</button>' +
-      (hasDefaults(cid) ? '<button type="button" class="link-btn quiet" data-action="restore-defaults">Restore default assessments</button>' : '') +
+      (hasDefaults(cid) ? '<button type="button" class="link-btn quiet" data-action="restore-defaults">Clear my marks</button>' : '') +
       '</div></section>';
 
     if (def.parts.indexOf('cpt') !== -1) {
@@ -355,25 +387,35 @@
     return html;
   }
 
-  function numInput(field, value, label, placeholder, extraClass) {
+  function numInput(field, value, label, placeholder, extraClass, disabled) {
     return '<input type="text" inputmode="decimal" autocomplete="off" class="blank num' + (extraClass ? ' ' + extraClass : '') + '" data-field="' + field + '"' +
-      ' value="' + esc(value) + '" placeholder="' + placeholder + '" aria-label="' + esc(label) + '">';
+      ' value="' + esc(value) + '" placeholder="' + placeholder + '" aria-label="' + esc(label) + '"' + (disabled ? ' disabled' : '') + '>';
   }
 
-  function scoreHtml(prefix, m, label) {
+  /**
+   * Score / out of. `locked` (default assessments) fixes the "out of"; a locked
+   * blank "out of" means the category isn't tested, so the score is off too.
+   */
+  function scoreHtml(prefix, m, label, locked) {
+    var untested = locked && !str(m.outOf).trim();
     return '<span class="score">' +
-      numInput(prefix + 'score', m.score, label + ' score', 'score') +
+      numInput(prefix + 'score', m.score, label + ' score', untested ? '—' : 'score', '', untested) +
       '<span class="slash" aria-hidden="true">/</span>' +
-      numInput(prefix + 'outOf', m.outOf, label + ' out of', 'out of') + '</span>';
+      numInput(prefix + 'outOf', m.outOf, label + ' out of', untested ? '—' : 'out of', '', locked) + '</span>';
   }
 
   /** Count checkbox + name input; unticking leaves the entry out of every mark. */
-  function nameLine(obj, placeholder, label, context) {
+  function nameLine(obj, placeholder, label, context, locked) {
     return '<div class="name-line">' +
       '<input type="checkbox" class="count-check" data-field="counted"' + (obj.disabled ? '' : ' checked') +
       ' aria-label="Count ' + esc(context) + ' in my mark" title="Count this in my mark">' +
-      '<input type="text" class="blank name" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
-      ' aria-label="' + label + '" autocomplete="off"></div>';
+      '<input type="text" class="blank name' + (locked ? ' locked' : '') + '" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
+      ' aria-label="' + label + '" autocomplete="off"' +
+      (locked ? ' readonly title="Default assessment: everyone has the same one, so its name, type and out of are fixed"' : '') + '></div>';
+  }
+
+  function deleteBtn(context, locked) {
+    return locked ? '' : '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button>';
   }
 
   function predictedToggle(on) {
@@ -388,36 +430,36 @@
       return '<option value="' + esc(t.id) + '"' + (t.id === a.type ? ' selected' : '') + '>' + esc(t.label) + '</option>';
     }).join('');
     var typeWeight = w.types[a.type] != null ? plainNum(w.types[a.type]) : '0';
+    var locked = isDefaultEntry(cid, 'assessments', a);
 
     var html = '<div class="entry' + (a.predicted ? ' is-predicted' : '') + (def.categories ? ' has-cats' : '') + '" data-kind="assessment" data-id="' + esc(a.id) + '">';
-    html += '<div class="entry-main">' + nameLine(a, 'Untitled assessment', 'Assessment name', context);
+    html += '<div class="entry-main">' + nameLine(a, 'Untitled assessment', 'Assessment name', context, locked);
     if (def.categories) {
       html += '</div><div class="cats">' + GC.CATEGORY_ORDER.map(function (k) {
         return '<div class="cat-row"><span class="cat" title="' + GC.CATEGORY_LABELS[k] + '">' + k + '</span>' +
-          scoreHtml(k + '.', a.marks[k], context + ' ' + GC.CATEGORY_LABELS[k]) +
+          scoreHtml(k + '.', a.marks[k], context + ' ' + GC.CATEGORY_LABELS[k], locked) +
           '<span class="pct" data-pct="' + k + '"></span></div>';
       }).join('') + '</div>';
     } else {
-      html += scoreHtml('', a, context) + '<span class="pct" data-pct=""></span></div>';
+      html += scoreHtml('', a, context, locked) + '<span class="pct" data-pct=""></span></div>';
     }
     html += '<div class="entry-meta">' +
-      '<select class="type-select" data-field="type" aria-label="' + esc(context) + ' type">' + options + '</select>' +
+      '<select class="type-select" data-field="type" aria-label="' + esc(context) + ' type"' + (locked ? ' disabled' : '') + '>' + options + '</select>' +
       '<label class="weight-field">Weight ' +
       '<input type="text" inputmode="decimal" autocomplete="off" class="blank num small" data-field="weight" value="' + esc(a.weight) + '"' +
       ' placeholder="' + typeWeight + '" aria-label="' + esc(context) + ' weight (blank uses the type weight of ' + typeWeight + ')"></label>' +
-      predictedToggle(a.predicted) +
-      '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button>' +
+      predictedToggle(a.predicted) + deleteBtn(context, locked) +
       '</div></div>';
     return html;
   }
 
-  function cptHtml(e, index) {
+  function cptHtml(cid, e, index) {
     var context = e.name ? e.name : 'CPT mark ' + (index + 1);
+    var locked = isDefaultEntry(cid, 'cpt', e);
     return '<div class="entry' + (e.predicted ? ' is-predicted' : '') + '" data-kind="cpt" data-id="' + esc(e.id) + '">' +
-      '<div class="entry-main">' + nameLine(e, 'Untitled CPT mark', 'CPT mark name', context) +
-      scoreHtml('', e, context) + '<span class="pct" data-pct=""></span></div>' +
-      '<div class="entry-meta">' + predictedToggle(e.predicted) +
-      '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button></div></div>';
+      '<div class="entry-main">' + nameLine(e, 'Untitled CPT mark', 'CPT mark name', context, locked) +
+      scoreHtml('', e, context, locked) + '<span class="pct" data-pct=""></span></div>' +
+      '<div class="entry-meta">' + predictedToggle(e.predicted) + deleteBtn(context, locked) + '</div></div>';
   }
 
   function singleHtml(slot, title) {
@@ -456,7 +498,7 @@
     if (!el) return;
     var list = state.courses[cid].cpt;
     el.innerHTML = list.length
-      ? list.map(cptHtml).join('')
+      ? list.map(function (e, i) { return cptHtml(cid, e, i); }).join('')
       : '<p class="empty-list">No CPT marks yet.</p>';
     each(el.querySelectorAll('.entry'), function (e) { updateEntry(cid, e); });
   }
@@ -875,15 +917,15 @@
 
     if (action === 'restore-defaults') {
       var hasCpt = GC.COURSES[cid].parts.indexOf('cpt') !== -1;
-      if (!confirm('Clear every assessment' + (hasCpt ? ' and CPT mark' : '') + ' in ' + GC.COURSES[cid].name +
-        ' and start again from the default list? All marks you entered for them will be deleted. ' +
+      if (!confirm('Clear your marks in ' + GC.COURSES[cid].name + '? Every assessment' + (hasCpt ? ' and CPT mark' : '') +
+        ' score is erased and any assessments you added yourself are removed. ' +
         'Your final exam, attendance and weights stay.')) return;
-      var restored = restoreDefaults(cid);
+      restoreDefaults(cid);
       save();
       renderAssessments(cid);
       renderCpt(cid);
       refresh(cid);
-      toast('Restored ' + restored + ' default assessment' + (restored === 1 ? '' : 's'));
+      toast('Marks cleared');
       return;
     }
 
@@ -900,7 +942,8 @@
       var entryEl = btn.closest('[data-kind]');
       var kind = entryEl.getAttribute('data-kind');
       var obj = findEntry(cid, entryEl);
-      var name = obj && obj.name ? '"' + obj.name + '"' : 'this ' + (kind === 'cpt' ? 'CPT mark' : 'assessment');
+      if (!obj || isDefaultEntry(cid, kind === 'cpt' ? 'cpt' : 'assessments', obj)) return;
+      var name = obj.name ? '"' + obj.name + '"' : 'this ' + (kind === 'cpt' ? 'CPT mark' : 'assessment');
       if (!confirm('Delete ' + name + '?')) return;
       if (kind === 'cpt') {
         c.cpt = c.cpt.filter(function (x) { return x !== obj; });
@@ -1006,12 +1049,35 @@
     reader.readAsText(file);
   });
 
-  renderAll();
+  // ----------------------------------------------------------------- start
 
-  if (returning) {
-    var addedText = GC.COURSE_ORDER.filter(function (cid) { return newDefaults[cid]; }).map(function (cid) {
-      return newDefaults[cid] + ' in ' + GC.COURSES[cid].shortName;
+  function start() {
+    // Returning visitors get told when new defaults show up; first-time visitors don't.
+    var returning = GC.COURSE_ORDER.some(function (cid) {
+      var c = state.courses[cid];
+      return (c.seenDefaults && c.seenDefaults.length) || c.assessments.length;
     });
-    if (addedText.length) toast('New assessments added: ' + addedText.join(', ') + '. Your marks are unchanged.', 6000);
+    var newDefaults = {};
+    if (applyDefaults(state, newDefaults)) save();
+    renderAll();
+
+    if (returning) {
+      var addedText = GC.COURSE_ORDER.filter(function (cid) { return newDefaults[cid]; }).map(function (cid) {
+        return newDefaults[cid] + ' in ' + GC.COURSES[cid].shortName;
+      });
+      if (addedText.length) toast('New assessments added: ' + addedText.join(', ') + '. Your marks are unchanged.', 6000);
+    }
+  }
+
+  // Load defaults.js with a unique URL so the browser never uses a stale cached
+  // copy; new defaults then show up on a normal reload. If it fails to load
+  // (e.g. offline), the page still starts with what the person already has.
+  if (window.COURSE_DEFAULTS) {
+    start();
+  } else {
+    var defaultsScript = document.createElement('script');
+    defaultsScript.src = 'defaults.js?v=' + Date.now();
+    defaultsScript.onload = defaultsScript.onerror = start;
+    document.body.appendChild(defaultsScript);
   }
 })();

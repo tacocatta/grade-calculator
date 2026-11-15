@@ -7,6 +7,12 @@
  *        { name: 'Unit 4 Test', type: 'test', outOf: 30 },
  *   2. Commit and push. Everyone gets it the next time they open the site,
  *      added to the end of their list. People who already have it don't get a copy.
+ *      Defaults can't be deleted or renamed on the site, and their type and
+ *      out of are fixed, so everyone has the same list (people can still untick
+ *      one so it doesn't count, and give it their own weight).
+ *
+ * FIXING A MISTAKE: change the type or outOf here and push. Everyone's copy
+ * updates the next time they open the site; their scores stay.
  *
  * FIELDS
  *   name    What it's called. Must be unique within the course.
@@ -19,8 +25,8 @@
  *   weight  Optional. Gives this one assessment its own weight instead of its type's.
  *
  * DON'T rename or remove an entry once it's pushed. The name is how the site
- * knows who already has it, so a renamed entry shows up again as a new one.
- * (If someone deletes an entry from their own list, it doesn't come back.)
+ * knows who already has it, so a renamed entry shows up again as a new one,
+ * and a removed one becomes an ordinary (deletable) assessment for people who have it.
  *
  * Data Management CPT marks go in `cpt` the same way: { name: 'Proposal', outOf: 20 }
  */
@@ -53,6 +59,7 @@ window.COURSE_DEFAULTS = {
       { name: 'Unit 3 Quiz', type: 'quiz', outOf: 31 },
       { name: 'Unit 3 Test', type: 'test', outOf: 33 },
       { name: 'Unit 1-3 GC', type: 'quiz', outOf: 20 },
+      { name: 'Unit 4 Quiz', type: 'quiz', outOf: 19 },
     ]
   },
 
