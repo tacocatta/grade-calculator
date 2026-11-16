@@ -22,7 +22,10 @@
         <input type="file" id="import-file" accept="application/json,.json" hidden>
       </div>
     </div>
-    <nav class="wrap tabs" role="tablist" aria-label="Courses" id="tabs"></nav>
+    <div class="wrap tabs-bar">
+      <nav class="tabs" role="tablist" aria-label="Courses" id="tabs"></nav>
+      <button type="button" class="add-tab" data-course-action="open" title="Add a course, or hide or delete courses">+ Course</button>
+    </div>
   </header>
 
   <main class="wrap" id="panels"></main>
@@ -30,6 +33,17 @@
   <footer class="wrap app-footer">
     <p>Your marks are saved on this device only. Export a backup to move them to another phone or computer.</p>
   </footer>
+
+  <dialog class="course-dialog" id="courses-dialog" aria-labelledby="courses-title">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <h2 id="courses-title">Courses</h2>
+        <button type="button" class="link-btn" data-course-action="close">Done</button>
+      </div>
+      <p class="dialog-msg" id="courses-msg" role="status" aria-live="polite"></p>
+      <div id="courses-body"></div>
+    </div>
+  </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

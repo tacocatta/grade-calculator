@@ -17,9 +17,9 @@
 
   var state = loadState();
   var solverState = {};
-  GC.COURSE_ORDER.forEach(function (cid) {
-    solverState[cid] = { target: '', afterBoost: false, solveFor: 'final', values: {} };
-  });
+  function solverFor(cid) {
+    return solverState[cid] || (solverState[cid] = { target: '', afterBoost: false, solveFor: 'final', values: {} });
+  }
 
   // ---------------------------------------------------------------- helpers
 
@@ -268,11 +268,59 @@
     return count;
   }
 
+  // ------------------------------------------------------- course list
+  // Built-in courses (calc.js) can be hidden; courses people make themselves
+  // (state.customCourses) can be renamed and deleted. Both keep their marks in
+  // state.courses[id].
+
+  var COURSE_NAME_MAX = 40;
+
+  function customIds(s) { return s.customCourses.map(function (cc) { return cc.id; }); }
+
+  /** Courses that get a tab, in tab order: built-ins first, then the person's own. */
+  function visibleIn(s) {
+    return GC.COURSE_ORDER.filter(function (cid) { return s.hidden.indexOf(cid) === -1; }).concat(customIds(s));
+  }
+  function visibleCourses() { return visibleIn(state); }
+
+  function findCustomCourse(id) {
+    for (var i = 0; i < state.customCourses.length; i++) if (state.customCourses[i].id === id) return state.customCourses[i];
+    return null;
+  }
+
+  function normalizeCustomCourses(list) {
+    var seen = {};
+    return (Array.isArray(list) ? list : []).filter(function (cc) {
+      if (!isObj(cc) || !/^cc-[a-z0-9]+$/i.test(str(cc.id)) || seen[cc.id]) return false;
+      seen[cc.id] = true;
+      return true;
+    }).map(function (cc) {
+      return {
+        id: String(cc.id),
+        name: str(cc.name).trim().slice(0, COURSE_NAME_MAX) || 'Untitled course',
+        ap: !!cc.ap, cpt: !!cc.cpt, categories: !!cc.categories
+      };
+    });
+  }
+
+  /** Makes GC.COURSES hold exactly these custom courses (plus the built-ins). */
+  function registerCustomCourses(list) {
+    Object.keys(GC.COURSES).forEach(function (cid) { if (GC.COURSES[cid].custom) delete GC.COURSES[cid]; });
+    list.forEach(function (cc) { GC.COURSES[cc.id] = GC.customCourse(cc); });
+  }
+
   function normalizeState(raw) {
-    var s = { version: 1, active: 'physics', courses: {} };
-    if (isObj(raw) && GC.COURSES[raw.active]) s.active = raw.active;
-    var courses = isObj(raw) && isObj(raw.courses) ? raw.courses : {};
-    GC.COURSE_ORDER.forEach(function (cid) { s.courses[cid] = normalizeCourse(cid, courses[cid]); });
+    raw = isObj(raw) ? raw : {};
+    var s = { version: 1, active: 'physics', courses: {}, customCourses: normalizeCustomCourses(raw.customCourses), hidden: [] };
+    registerCustomCourses(s.customCourses);
+    if (Array.isArray(raw.hidden)) {
+      s.hidden = GC.COURSE_ORDER.filter(function (cid) { return raw.hidden.indexOf(cid) !== -1; });
+    }
+    if (!visibleIn(s).length) s.hidden = []; // always at least one course showing
+    var courses = isObj(raw.courses) ? raw.courses : {};
+    GC.COURSE_ORDER.concat(customIds(s)).forEach(function (cid) { s.courses[cid] = normalizeCourse(cid, courses[cid]); });
+    var visible = visibleIn(s);
+    s.active = visible.indexOf(raw.active) !== -1 ? raw.active : visible[0];
     return s;
   }
 
@@ -328,12 +376,14 @@
   // ---------------------------------------------------------------- render
 
   function renderTabs() {
-    tabsEl.innerHTML = GC.COURSE_ORDER.map(function (cid) {
+    tabsEl.innerHTML = visibleCourses().map(function (cid) {
       var on = cid === state.active;
       return '<button type="button" class="tab" role="tab" id="tab-' + cid + '" data-tab="' + cid + '"' +
         ' aria-controls="panel-' + cid + '" aria-selected="' + on + '" tabindex="' + (on ? 0 : -1) + '">' +
         esc(GC.COURSES[cid].shortName) + '</button>';
     }).join('');
+    var on = document.getElementById('tab-' + state.active);
+    if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   function setActive(cid, focus) {
@@ -355,7 +405,8 @@
     var def = GC.COURSES[cid];
     var html = '<section class="panel" id="panel-' + cid + '" role="tabpanel" aria-labelledby="course-title-' + cid + '" data-course="' + cid + '"' +
       (cid === state.active ? '' : ' hidden') + '>';
-    html += '<div class="course-head"><h2 id="course-title-' + cid + '">' + esc(def.name) + '</h2></div>';
+    html += '<div class="course-head"><h2 id="course-title-' + cid + '">' + esc(def.name) + '</h2>' +
+      '<button type="button" class="link-btn quiet" data-course-action="open">' + (def.custom ? 'Edit course' : 'Hide or add courses') + '</button></div>';
     html += '<div class="scorecard" data-region="results" aria-live="polite"></div>';
 
     html += '<section class="block"><h3>Assessments</h3>';
@@ -404,9 +455,18 @@
       numInput(prefix + 'outOf', m.outOf, label + ' out of', untested ? '—' : 'out of', '', locked) + '</span>';
   }
 
-  /** Count checkbox + name input; unticking leaves the entry out of every mark. */
+  /** Grip for dragging an entry up or down; arrow keys move it too. */
+  function dragHandle(context) {
+    return '<button type="button" class="drag-handle" aria-label="Move ' + esc(context) + '. Use the up and down arrow keys."' +
+      ' title="Drag to move">' +
+      '<svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true" focusable="false">' +
+      '<circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/>' +
+      '<circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></svg></button>';
+  }
+
+  /** Drag handle + count checkbox + name input; unticking leaves the entry out of every mark. */
   function nameLine(obj, placeholder, label, context, locked) {
-    return '<div class="name-line">' +
+    return '<div class="name-line">' + dragHandle(context) +
       '<input type="checkbox" class="count-check" data-field="counted"' + (obj.disabled ? '' : ' checked') +
       ' aria-label="Count ' + esc(context) + ' in my mark" title="Count this in my mark">' +
       '<input type="text" class="blank name' + (locked ? ' locked' : '') + '" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
@@ -604,7 +664,7 @@
 
   function renderSolver(cid) {
     var def = GC.COURSES[cid];
-    var s = solverState[cid];
+    var s = solverFor(cid);
     var html = '<p class="hint">Enter a course mark, then pick the part to solve for. ' +
       'The other parts use your current real marks (shown in grey) unless you type over them. ' +
       'Parts with no mark yet, like a final exam you haven\'t written, are left out.</p>' +
@@ -630,7 +690,7 @@
   function updateSolver(cid) {
     var def = GC.COURSES[cid];
     var c = state.courses[cid];
-    var s = solverState[cid];
+    var s = solverFor(cid);
     var w = weightsFor(cid);
     var current = GC.courseMark(cid, c, w, false);
     var box = region(cid, 'solver');
@@ -801,8 +861,8 @@
 
   function renderAll() {
     renderTabs();
-    panelsEl.innerHTML = GC.COURSE_ORDER.map(panelShell).join('');
-    GC.COURSE_ORDER.forEach(function (cid) {
+    panelsEl.innerHTML = visibleCourses().map(panelShell).join('');
+    visibleCourses().forEach(function (cid) {
       var panel = document.getElementById('panel-' + cid);
       renderAssessments(cid);
       renderCpt(cid);
@@ -824,7 +884,7 @@
     var cid = courseOf(t);
     if (!cid) return;
     var c = state.courses[cid];
-    var s = solverState[cid];
+    var s = solverFor(cid);
 
     var solverField = t.getAttribute('data-solver');
     if (solverField) {
@@ -999,19 +1059,346 @@
     }
   });
 
+  // --------------------------------------------------------------- reorder
+  // Assessments and CPT marks can be dragged by their grip (mouse or touch),
+  // or moved with the arrow keys while the grip has focus. Order has no effect
+  // on any mark; it's only how the list reads.
+
+  function listKey(kind) { return kind === 'cpt' ? 'cpt' : 'assessments'; }
+
+  function renderList(cid, kind) {
+    if (kind === 'cpt') renderCpt(cid);
+    else renderAssessments(cid);
+  }
+
+  function entryById(container, id) {
+    var els = container.querySelectorAll('.entry');
+    for (var i = 0; i < els.length; i++) if (els[i].getAttribute('data-id') === id) return els[i];
+    return null;
+  }
+
+  /** Puts a course's list in the order given by ids. Returns true if it changed. */
+  function applyOrder(cid, kind, ids) {
+    var c = state.courses[cid];
+    var key = listKey(kind);
+    var byId = {};
+    c[key].forEach(function (x) { byId[x.id] = x; });
+    var next = ids.map(function (id) { return byId[id]; }).filter(Boolean);
+    if (next.length !== c[key].length) return false;
+    var same = next.every(function (x, i) { return x === c[key][i]; });
+    if (same) return false;
+    c[key] = next;
+    save();
+    return true;
+  }
+
+  var drag = null;
+
+  function domIds(container) {
+    return Array.prototype.map.call(container.querySelectorAll('.entry'), function (el) { return el.getAttribute('data-id'); });
+  }
+
+  /** Slides an entry from where it was to where it is now (after a DOM move). */
+  function slideFrom(el, oldTop) {
+    var delta = oldTop - el.getBoundingClientRect().top;
+    if (!delta || !el.animate) return;
+    el.animate([{ transform: 'translateY(' + delta + 'px)' }, { transform: 'none' }],
+      { duration: 150, easing: 'ease-out' });
+  }
+
+  /** Moves the dragged entry to follow the pointer, swapping with neighbours it passes. */
+  function dragUpdate() {
+    var el = drag.el;
+    var top = drag.y - drag.grab;
+    var bottom = top + el.offsetHeight;
+
+    // Always move the neighbour, never the dragged entry: taking the dragged
+    // entry out of the page, even for a moment, drops the pointer capture.
+    var prev = el.previousElementSibling, next = el.nextElementSibling;
+    var r;
+    if (next && bottom > (r = next.getBoundingClientRect()).top + r.height / 2) {
+      drag.list.insertBefore(next, el);
+      slideFrom(next, r.top);
+    } else if (prev && top < (r = prev.getBoundingClientRect()).top + r.height / 2) {
+      drag.list.insertBefore(prev, el.nextElementSibling);
+      slideFrom(prev, r.top);
+    }
+    // Where the entry sits in the list (without the drag offset), then offset it to the pointer.
+    var naturalTop = el.getBoundingClientRect().top - drag.shift;
+    drag.shift = top - naturalTop;
+    el.style.transform = 'translateY(' + drag.shift + 'px)';
+  }
+
+  /** Scrolls the page while an entry is held near the top or bottom edge. */
+  function dragScroll() {
+    if (!drag) return;
+    var headerBottom = document.querySelector('.app-header').getBoundingClientRect().bottom;
+    var edge = 60, speed = 0;
+    if (drag.y < headerBottom + edge) speed = -Math.min(edge, headerBottom + edge - drag.y) / 4;
+    else if (drag.y > window.innerHeight - edge) speed = Math.min(edge, drag.y - (window.innerHeight - edge)) / 4;
+    if (speed) {
+      var before = window.scrollY;
+      window.scrollBy(0, speed);
+      if (window.scrollY !== before) dragUpdate();
+    }
+    drag.raf = requestAnimationFrame(dragScroll);
+  }
+
+  document.addEventListener('pointerdown', function (e) {
+    var handle = e.target.closest('.drag-handle');
+    if (!handle || drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    var el = handle.closest('.entry');
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch (err) { /* not supported */ }
+    drag = {
+      el: el, list: el.parentNode, cid: courseOf(el), kind: el.getAttribute('data-kind'),
+      pointerId: e.pointerId, y: e.clientY, grab: e.clientY - el.getBoundingClientRect().top, shift: 0
+    };
+    el.classList.add('dragging');
+    document.body.classList.add('is-dragging');
+    drag.raf = requestAnimationFrame(dragScroll);
+  });
+
+  document.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    e.preventDefault();
+    drag.y = e.clientY;
+    dragUpdate();
+  });
+
+  function dragEnd(e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    var d = drag;
+    drag = null;
+    cancelAnimationFrame(d.raf);
+    d.el.style.transform = '';
+    d.el.classList.remove('dragging');
+    document.body.classList.remove('is-dragging');
+    // Re-render so unnamed entries' labels ("Assessment 3") match their new place.
+    if (applyOrder(d.cid, d.kind, domIds(d.list))) renderList(d.cid, d.kind);
+  }
+  document.addEventListener('pointerup', dragEnd);
+  document.addEventListener('pointercancel', dragEnd);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    var handle = e.target.closest && e.target.closest('.drag-handle');
+    if (!handle || drag) return;
+    e.preventDefault();
+    var entryEl = handle.closest('.entry');
+    var cid = courseOf(entryEl);
+    var kind = entryEl.getAttribute('data-kind');
+    var list = state.courses[cid][listKey(kind)];
+    var obj = findEntry(cid, entryEl);
+    var from = list.indexOf(obj);
+    var to = from + (e.key === 'ArrowUp' ? -1 : 1);
+    if (from === -1 || to < 0 || to >= list.length) return;
+    list.splice(from, 1);
+    list.splice(to, 0, obj);
+    save();
+    renderList(cid, kind);
+    var moved = entryById(region(cid, listKey(kind)), obj.id);
+    if (moved) moved.querySelector('.drag-handle').focus();
+    toast('Moved to ' + (to + 1) + ' of ' + list.length);
+  });
+
   tabsEl.addEventListener('keydown', function (e) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    var i = GC.COURSE_ORDER.indexOf(state.active);
-    var n = GC.COURSE_ORDER.length;
+    var order = visibleCourses();
+    var i = order.indexOf(state.active);
+    var n = order.length;
     i = (i + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
-    setActive(GC.COURSE_ORDER[i], true);
+    setActive(order[i], true);
     e.preventDefault();
+  });
+
+  // ------------------------------------------------------- courses dialog
+
+  var dialogEl = document.getElementById('courses-dialog');
+  var dialogBody = document.getElementById('courses-body');
+  var dialogMsg = document.getElementById('courses-msg');
+
+  /** Messages inside the dialog (the toast sits behind it while it's open). */
+  var dialogMsgTimer;
+  function dialogMessage(text) {
+    dialogMsg.textContent = text;
+    clearTimeout(dialogMsgTimer);
+    if (text) dialogMsgTimer = setTimeout(function () { dialogMsg.textContent = ''; }, 5000);
+  }
+
+  function describeCourse(cc) {
+    var bits = [cc.cpt ? 'Term, CPT, final exam, attendance' : 'Term, final exam, attendance'];
+    if (cc.categories) bits.push('K/T/C/A marks');
+    return bits.join(' · ');
+  }
+
+  function optionCheck(name, label, hint) {
+    return '<label class="option"><input type="checkbox" name="' + name + '">' +
+      '<span><span class="option-label">' + label + '</span><span class="option-hint">' + hint + '</span></span></label>';
+  }
+
+  function renderCourseDialog() {
+    var html = '<form class="dialog-section" data-course-form novalidate><h3>Add a course</h3>' +
+      '<label class="field"><span class="field-label">Course name</span>' +
+      '<input type="text" class="blank name" name="name" maxlength="' + COURSE_NAME_MAX + '" autocomplete="off" placeholder="e.g. Chemistry 12"></label>' +
+      '<fieldset class="options"><legend class="field-label">It has</legend>' +
+      optionCheck('cpt', 'A CPT', 'Term 50%, CPT 15%, final exam 25%, attendance 10%. Without one: term 65%, final 25%, attendance 10%.') +
+      optionCheck('categories', 'Knowledge, Thinking, Communication and Application marks', 'Each assessment gets separate K/T/C/A marks, like AP Physics.') +
+      optionCheck('ap', 'The AP boost', 'Your mark is multiplied by 1.05, up to 100%.') +
+      '</fieldset>' +
+      '<p class="hint">You can change weights afterwards under Weights and assessment types. ' +
+      'The CPT and K/T/C/A choices can\'t be changed once the course is made.</p>' +
+      '<button type="submit" class="plain-btn primary">Add course</button></form>';
+
+    if (state.customCourses.length) {
+      html += '<section class="dialog-section"><h3>Your courses</h3>' + state.customCourses.map(function (cc) {
+        return '<div class="course-row" data-cc="' + esc(cc.id) + '">' +
+          '<input type="text" class="blank name" data-cc-field="name" value="' + esc(cc.name) + '" maxlength="' + COURSE_NAME_MAX + '"' +
+          ' aria-label="Course name" autocomplete="off">' +
+          '<label class="option inline"><input type="checkbox" data-cc-field="ap"' + (cc.ap ? ' checked' : '') + '> AP boost</label>' +
+          '<button type="button" class="delete-btn" data-course-action="delete" aria-label="Delete ' + esc(cc.name) + '">Delete</button>' +
+          '<p class="course-desc">' + esc(describeCourse(cc)) + '</p></div>';
+      }).join('') + '</section>';
+    }
+
+    html += '<section class="dialog-section"><h3>Built-in courses</h3>' +
+      '<p class="hint">Untick a course you don\'t take to hide it. Its marks are kept, so ticking it again brings everything back.</p>' +
+      GC.COURSE_ORDER.map(function (cid) {
+        return '<label class="option course-row"><input type="checkbox" data-builtin="' + cid + '"' +
+          (state.hidden.indexOf(cid) === -1 ? ' checked' : '') + '> ' + esc(GC.COURSES[cid].name) + '</label>';
+      }).join('') + '</section>';
+    dialogBody.innerHTML = html;
+  }
+
+  function openCourseDialog() {
+    dialogMessage('');
+    renderCourseDialog();
+    dialogEl.showModal();
+  }
+
+  /** After a course is added, removed, hidden or changed: keep the active tab valid and redraw. */
+  function coursesChanged(preferred) {
+    var visible = visibleCourses();
+    if (preferred && visible.indexOf(preferred) !== -1) state.active = preferred;
+    else if (visible.indexOf(state.active) === -1) state.active = visible[0];
+    save();
+    renderAll();
+  }
+
+  function addCourse(form) {
+    var nameInput = form.elements.name;
+    var name = nameInput.value.trim();
+    if (!name) {
+      nameInput.classList.add('invalid');
+      nameInput.focus();
+      dialogMessage('Give the course a name.');
+      return;
+    }
+    var cc = {
+      id: 'cc-' + uid(), name: name.slice(0, COURSE_NAME_MAX),
+      ap: form.elements.ap.checked, cpt: form.elements.cpt.checked, categories: form.elements.categories.checked
+    };
+    state.customCourses.push(cc);
+    GC.COURSES[cc.id] = GC.customCourse(cc);
+    state.courses[cc.id] = blankCourse();
+    coursesChanged(cc.id);
+    dialogEl.close();
+    toast(cc.name + ' added');
+  }
+
+  function renameCourse(cc, value) {
+    cc.name = value.trim().slice(0, COURSE_NAME_MAX) || 'Untitled course';
+    var def = GC.COURSES[cc.id];
+    def.name = def.shortName = cc.name;
+    var tab = document.getElementById('tab-' + cc.id);
+    var title = document.getElementById('course-title-' + cc.id);
+    if (tab) tab.textContent = cc.name;
+    if (title) title.textContent = cc.name;
+    save();
+  }
+
+  function deleteCourse(cc) {
+    if (visibleCourses().length === 1) {
+      dialogMessage('You need at least one course showing. Show or add another course first.');
+      return;
+    }
+    if (!confirm('Delete ' + cc.name + ' and all its marks? This can\'t be undone.')) return;
+    state.customCourses = state.customCourses.filter(function (x) { return x !== cc; });
+    delete state.courses[cc.id];
+    delete GC.COURSES[cc.id];
+    delete solverState[cc.id];
+    coursesChanged();
+    renderCourseDialog();
+    dialogMessage(cc.name + ' deleted.');
+  }
+
+  function setBuiltInShown(cid, shown, checkbox) {
+    if (!shown && visibleCourses().length === 1) {
+      checkbox.checked = true;
+      dialogMessage('You need at least one course showing. Add a course before hiding this one.');
+      return;
+    }
+    state.hidden = GC.COURSE_ORDER.filter(function (id) {
+      return id === cid ? !shown : state.hidden.indexOf(id) !== -1;
+    });
+    coursesChanged(shown ? cid : null);
+    dialogMessage(GC.COURSES[cid].name + (shown ? ' is showing again.' : ' is hidden. Its marks are kept.'));
+  }
+
+  dialogEl.addEventListener('submit', function (e) {
+    e.preventDefault();
+    addCourse(e.target);
+  });
+
+  dialogEl.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.name === 'name') t.classList.remove('invalid');
+    if (t.getAttribute('data-cc-field') === 'name') {
+      var cc = findCustomCourse(t.closest('[data-cc]').getAttribute('data-cc'));
+      if (cc) renameCourse(cc, t.value);
+    }
+  });
+
+  dialogEl.addEventListener('change', function (e) {
+    var t = e.target;
+    var field = t.getAttribute('data-cc-field');
+    var cc = field ? findCustomCourse(t.closest('[data-cc]').getAttribute('data-cc')) : null;
+    if (field === 'name' && cc) {
+      t.value = cc.name; // a blank name becomes "Untitled course"
+    } else if (field === 'ap' && cc) {
+      cc.ap = t.checked;
+      GC.COURSES[cc.id].ap = cc.ap;
+      coursesChanged();
+    } else if (t.hasAttribute('data-builtin')) {
+      setBuiltInShown(t.getAttribute('data-builtin'), t.checked, t);
+    }
+  });
+
+  dialogEl.addEventListener('click', function (e) {
+    if (e.target === dialogEl) { dialogEl.close(); return; } // backdrop
+    var btn = e.target.closest('[data-course-action]');
+    if (!btn) return;
+    var action = btn.getAttribute('data-course-action');
+    if (action === 'close') dialogEl.close();
+    if (action === 'delete') {
+      var cc = findCustomCourse(btn.closest('[data-cc]').getAttribute('data-cc'));
+      if (cc) deleteCourse(cc);
+    }
+  });
+
+  // Buttons outside the dialog: "+ Course" in the tab bar, and each course's header link.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-course-action="open"]');
+    if (btn) openCourseDialog();
   });
 
   // --------------------------------------------------------- export/import
 
   function exportData() {
-    var payload = { app: 'grade-calculator', version: 1, exportedAt: new Date().toISOString(), courses: state.courses };
+    var payload = {
+      app: 'grade-calculator', version: 1, exportedAt: new Date().toISOString(),
+      courses: state.courses, customCourses: state.customCourses, hidden: state.hidden
+    };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var d = new Date();
@@ -1039,7 +1426,7 @@
         return;
       }
       if (!confirm('Replace all marks on this device with the marks in this backup?')) return;
-      state = normalizeState({ active: state.active, courses: parsed.courses });
+      state = normalizeState({ active: state.active, courses: parsed.courses, customCourses: parsed.customCourses, hidden: parsed.hidden });
       applyDefaults(state);
       save();
       renderAll();

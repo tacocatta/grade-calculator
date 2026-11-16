@@ -54,6 +54,27 @@
 
   var COURSE_ORDER = ['physics', 'calculus', 'advfunctions', 'datamgmt'];
 
+  /**
+   * A course someone made on the site. spec = {id, name, ap, cpt, categories}.
+   * Uses the same split as the built-in courses: 65/25/10, or 50/15/25/10 with
+   * a CPT. With K/T/C/A, the category weights add up to the term weight.
+   * The page adds the result to COURSES so everything else works the same.
+   */
+  function customCourse(spec) {
+    var cpt = !!spec.cpt;
+    var name = String(spec.name || '').trim() || 'Untitled course';
+    var def = {
+      id: spec.id, name: name, shortName: name, ap: !!spec.ap, custom: true,
+      parts: cpt ? ['term', 'cpt', 'final', 'attendance'] : ['term', 'final', 'attendance'],
+      components: cpt ? { term: 50, cpt: 15, final: 25, attendance: 10 } : { term: 65, final: 25, attendance: 10 },
+      types: { test: 1, quiz: 0.5 }
+    };
+    if (spec.categories) {
+      def.categories = cpt ? { K: 15, T: 20, C: 7.5, A: 7.5 } : { K: 20, T: 25, C: 10, A: 10 };
+    }
+    return def;
+  }
+
   var PART_LABELS = { term: 'Term', cpt: 'CPT', final: 'Final exam', attendance: 'Attendance & Participation' };
   var CATEGORY_LABELS = { K: 'Knowledge', T: 'Thinking', C: 'Communication', A: 'Application' };
   var CATEGORY_ORDER = ['K', 'T', 'C', 'A'];
@@ -290,6 +311,7 @@
     BOOST: BOOST,
     COURSES: COURSES,
     COURSE_ORDER: COURSE_ORDER,
+    customCourse: customCourse,
     PART_LABELS: PART_LABELS,
     CATEGORY_LABELS: CATEGORY_LABELS,
     CATEGORY_ORDER: CATEGORY_ORDER,
