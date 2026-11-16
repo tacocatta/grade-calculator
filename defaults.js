@@ -1,21 +1,12 @@
 /*
- * Default assessments: everyone using the site gets these, with the score left
- * blank for them to fill in.
- *
- * HOW TO ADD ONE
- *   1. Add a line to the right course below, for example:
- *        { name: 'Unit 4 Test', type: 'test', outOf: 30 },
- *   2. Commit and push. Everyone gets it the next time they open the site,
- *      added to the end of their list. People who already have it don't get a copy.
- *      Defaults can't be deleted or renamed on the site, and their type and
- *      out of are fixed, so everyone has the same list (people can still untick
- *      one so it doesn't count, and give it their own weight).
- *
- * FIXING A MISTAKE: change the type or outOf here and push. Everyone's copy
- * updates the next time they open the site; their scores stay.
+ * Starting assessments for each built-in course, with the scores left blank.
+ * A first-time visitor's courses start with these; after that they're ordinary
+ * assessments people can edit, move or delete. "Clear my marks" puts a course
+ * back to this list. Changing this file doesn't affect anyone who has already
+ * used the site.
  *
  * FIELDS
- *   name    What it's called. Must be unique within the course.
+ *   name    What it's called.
  *   type    'test' or 'quiz' in every course
  *           'lab'   AP Physics only
  *           'group' Group Assignment (Advanced Functions and Data Management only)
@@ -23,10 +14,6 @@
  *           AP Physics: one per category, e.g. outOf: { K: 10, T: 20, C: 5, A: 10 }
  *           (leave out a category the assessment doesn't test).
  *   weight  Optional. Gives this one assessment its own weight instead of its type's.
- *
- * DON'T rename or remove an entry once it's pushed. The name is how the site
- * knows who already has it, so a renamed entry shows up again as a new one,
- * and a removed one becomes an ordinary (deletable) assessment for people who have it.
  *
  * Data Management CPT marks go in `cpt` the same way: { name: 'Proposal', outOf: 20 }
  */

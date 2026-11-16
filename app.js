@@ -134,138 +134,50 @@
         c[slot] = { score: str(raw[slot].score), outOf: str(raw[slot].outOf), predicted: !!raw[slot].predicted };
       }
     });
-    if (Array.isArray(raw.seenDefaults)) c.seenDefaults = raw.seenDefaults.map(str);
     return c;
   }
 
-  /*
-   * Makes sure everyone has every default assessment (defaults.js), matched by
-   * name. A missing one is put back in its place among the other defaults.
-   * Defaults can't be deleted or renamed in the page, so this mostly adds new
-   * ones, but it also brings back any removed before that rule existed.
-   * Defaults people already have get their type and "out of" updated from
-   * defaults.js, so a correction there reaches everyone. Scores are never touched.
-   * seenDefaults records which defaults this person has had (used to tell
-   * returning visitors apart from first-time ones).
-   * If `added` is given, it's filled with how many were added per course.
-   */
-  function applyDefaults(s, added) {
-    var changed = false;
+  // ----------------------------------------------------- starter lists
+  // defaults.js holds each built-in course's starting assessments. A first-time
+  // visitor gets them once; after that they're ordinary entries. "Clear my marks"
+  // puts a course back to its starting list.
 
-    GC.COURSE_ORDER.forEach(function (cid) {
-      var c = s.courses[cid];
-      c.seenDefaults = c.seenDefaults || [];
-
-      function merge(listName, prefix, make, sync) {
-        var defs = courseDefaults(cid, listName);
-        defs.forEach(function (d, di) {
-          var k = nameKey(d.name);
-          if (c.seenDefaults.indexOf(prefix + k) === -1) {
-            c.seenDefaults.push(prefix + k);
-            changed = true;
-          }
-          var have = c[listName];
-          var existing = have.find(function (x) { return nameKey(x.name) === k; });
-          if (existing) {
-            if (sync(existing, d)) changed = true;
-            return;
-          }
-          // Insert before the next default the person already has; otherwise at the end.
-          var later = defs.slice(di + 1).map(function (x) { return nameKey(x.name); });
-          var at = have.findIndex(function (x) { return later.indexOf(nameKey(x.name)) !== -1; });
-          have.splice(at === -1 ? have.length : at, 0, make(d));
-          changed = true;
-          if (added) added[cid] = (added[cid] || 0) + 1;
-        });
-      }
-
-      merge('assessments', 'a:',
-        function (d) { return makeDefaultAssessment(cid, c.settings, d); },
-        function (a, d) { return syncDefaultAssessment(cid, c.settings, a, d); });
-      if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) merge('cpt', 'c:', makeDefaultCpt, syncOutOf);
-    });
-    return changed;
+  function starterList(cid, listName) {
+    var defs = (window.COURSE_DEFAULTS || {})[cid];
+    var list = isObj(defs) && Array.isArray(defs[listName]) ? defs[listName] : [];
+    return list.filter(function (d) { return isObj(d) && str(d.name).trim(); });
   }
 
-  function nameKey(name) { return str(name).trim().toLowerCase(); }
+  function hasStarters(cid) {
+    return starterList(cid, 'assessments').length + starterList(cid, 'cpt').length > 0;
+  }
 
-  function makeDefaultAssessment(cid, settings, d) {
-    var a = newAssessment(cid);
+  function makeStarterAssessment(cid, settings, d) {
+    var a = newAssessment(cid, typeExists(cid, settings, d.type) ? d.type : 'test');
     a.name = str(d.name).trim();
     if (d.weight != null) a.weight = str(d.weight);
-    syncDefaultAssessment(cid, settings, a, d);
+    if (GC.COURSES[cid].categories) {
+      // A category the starter leaves out isn't tested, so its "out of" is blank.
+      GC.CATEGORY_ORDER.forEach(function (k) {
+        a.marks[k].outOf = isObj(d.outOf) && d.outOf[k] != null ? str(d.outOf[k]) : '';
+      });
+    } else {
+      a.outOf = str(d.outOf);
+    }
     return a;
   }
 
-  /** Sets a default assessment's type and "out of" from defaults.js. Returns true if anything changed. */
-  function syncDefaultAssessment(cid, settings, a, d) {
-    var changed = false;
-    var type = typeExists(cid, settings, d.type) ? d.type : 'test';
-    if (a.type !== type) { a.type = type; changed = true; }
-    if (GC.COURSES[cid].categories) {
-      // A category the default leaves out isn't tested, so its "out of" is blank.
-      GC.CATEGORY_ORDER.forEach(function (k) {
-        var want = isObj(d.outOf) && d.outOf[k] != null ? str(d.outOf[k]) : '';
-        if (a.marks[k].outOf !== want) { a.marks[k].outOf = want; changed = true; }
-      });
-      return changed;
-    }
-    return syncOutOf(a, d) || changed;
-  }
-
-  function syncOutOf(obj, d) {
-    var want = str(d.outOf);
-    if (obj.outOf === want) return false;
-    obj.outOf = want;
-    return true;
-  }
-
-  function makeDefaultCpt(d) {
+  function makeStarterCpt(d) {
     return { id: uid(), name: str(d.name).trim(), score: '', outOf: str(d.outOf), predicted: false, disabled: false };
   }
 
-  function courseDefaults(cid, listName) {
-    var defs = (window.COURSE_DEFAULTS || {})[cid];
-    var list = isObj(defs) && Array.isArray(defs[listName]) ? defs[listName] : [];
-    return list.filter(function (d) { return isObj(d) && nameKey(d.name); });
-  }
-
   /**
-   * True if this entry is a course default (can't be deleted or renamed).
-   * If two entries share a default's name, only the first one counts.
+   * Replaces a course's assessments (and CPT marks) with its starting list,
+   * with blank scores. Final exam, attendance and weights are left alone.
    */
-  function isDefaultEntry(cid, listName, obj) {
-    var k = nameKey(obj.name);
-    if (!k) return false;
-    var isDef = courseDefaults(cid, listName).some(function (d) { return nameKey(d.name) === k; });
-    if (!isDef) return false;
-    var list = state.courses[cid][listName];
-    for (var i = 0; i < list.length; i++) if (nameKey(list[i].name) === k) return list[i] === obj;
-    return false;
-  }
-
-  function hasDefaults(cid) {
-    return courseDefaults(cid, 'assessments').length + courseDefaults(cid, 'cpt').length > 0;
-  }
-
-  /**
-   * Clears the course's assessments (and CPT marks) and replaces them with the
-   * defaults from defaults.js, with blank scores. Final exam, attendance and
-   * weights are left alone. Returns how many defaults were added.
-   */
-  function restoreDefaults(cid) {
-    var c = state.courses[cid];
-    var assessments = courseDefaults(cid, 'assessments');
-    c.assessments = assessments.map(function (d) { return makeDefaultAssessment(cid, c.settings, d); });
-    c.seenDefaults = assessments.map(function (d) { return 'a:' + nameKey(d.name); });
-    var count = assessments.length;
-    if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) {
-      var cpt = courseDefaults(cid, 'cpt');
-      c.cpt = cpt.map(makeDefaultCpt);
-      c.seenDefaults = c.seenDefaults.concat(cpt.map(function (d) { return 'c:' + nameKey(d.name); }));
-      count += cpt.length;
-    }
-    return count;
+  function fillStarters(cid, c) {
+    c.assessments = starterList(cid, 'assessments').map(function (d) { return makeStarterAssessment(cid, c.settings, d); });
+    if (GC.COURSES[cid].parts.indexOf('cpt') !== -1) c.cpt = starterList(cid, 'cpt').map(makeStarterCpt);
   }
 
   // ------------------------------------------------------- course list
@@ -327,7 +239,10 @@
   function loadState() {
     var raw = null;
     try { raw = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { raw = null; }
-    return normalizeState(raw);
+    var s = normalizeState(raw);
+    // Nothing saved yet: a first-time visitor, so start each course with its starting list.
+    if (raw == null) GC.COURSE_ORDER.forEach(function (cid) { fillStarters(cid, s.courses[cid]); });
+    return s;
   }
 
   var saveWarned = false;
@@ -416,7 +331,7 @@
     }
     html += '<div class="rows" data-region="assessments"></div><div class="list-actions">' +
       '<button type="button" class="add-btn" data-action="add-assessment">+ Add assessment</button>' +
-      (hasDefaults(cid) ? '<button type="button" class="link-btn quiet" data-action="restore-defaults">Clear my marks</button>' : '') +
+      (hasStarters(cid) ? '<button type="button" class="link-btn quiet" data-action="clear-marks">Clear my marks</button>' : '') +
       '</div></section>';
 
     if (def.parts.indexOf('cpt') !== -1) {
@@ -438,21 +353,16 @@
     return html;
   }
 
-  function numInput(field, value, label, placeholder, extraClass, disabled) {
-    return '<input type="text" inputmode="decimal" autocomplete="off" class="blank num' + (extraClass ? ' ' + extraClass : '') + '" data-field="' + field + '"' +
-      ' value="' + esc(value) + '" placeholder="' + placeholder + '" aria-label="' + esc(label) + '"' + (disabled ? ' disabled' : '') + '>';
+  function numInput(field, value, label, placeholder) {
+    return '<input type="text" inputmode="decimal" autocomplete="off" class="blank num" data-field="' + field + '"' +
+      ' value="' + esc(value) + '" placeholder="' + placeholder + '" aria-label="' + esc(label) + '">';
   }
 
-  /**
-   * Score / out of. `locked` (default assessments) fixes the "out of"; a locked
-   * blank "out of" means the category isn't tested, so the score is off too.
-   */
-  function scoreHtml(prefix, m, label, locked) {
-    var untested = locked && !str(m.outOf).trim();
+  function scoreHtml(prefix, m, label) {
     return '<span class="score">' +
-      numInput(prefix + 'score', m.score, label + ' score', untested ? '—' : 'score', '', untested) +
+      numInput(prefix + 'score', m.score, label + ' score', 'score') +
       '<span class="slash" aria-hidden="true">/</span>' +
-      numInput(prefix + 'outOf', m.outOf, label + ' out of', untested ? '—' : 'out of', '', locked) + '</span>';
+      numInput(prefix + 'outOf', m.outOf, label + ' out of', 'out of') + '</span>';
   }
 
   /** Grip for dragging an entry up or down; arrow keys move it too. */
@@ -465,17 +375,16 @@
   }
 
   /** Drag handle + count checkbox + name input; unticking leaves the entry out of every mark. */
-  function nameLine(obj, placeholder, label, context, locked) {
+  function nameLine(obj, placeholder, label, context) {
     return '<div class="name-line">' + dragHandle(context) +
       '<input type="checkbox" class="count-check" data-field="counted"' + (obj.disabled ? '' : ' checked') +
       ' aria-label="Count ' + esc(context) + ' in my mark" title="Count this in my mark">' +
-      '<input type="text" class="blank name' + (locked ? ' locked' : '') + '" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
-      ' aria-label="' + label + '" autocomplete="off"' +
-      (locked ? ' readonly title="Default assessment: everyone has the same one, so its name, type and out of are fixed"' : '') + '></div>';
+      '<input type="text" class="blank name" data-field="name" value="' + esc(obj.name) + '" placeholder="' + placeholder + '"' +
+      ' aria-label="' + label + '" autocomplete="off"></div>';
   }
 
-  function deleteBtn(context, locked) {
-    return locked ? '' : '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button>';
+  function deleteBtn(context) {
+    return '<button type="button" class="delete-btn" data-action="delete-entry" aria-label="Delete ' + esc(context) + '">Delete</button>';
   }
 
   function predictedToggle(on) {
@@ -490,36 +399,34 @@
       return '<option value="' + esc(t.id) + '"' + (t.id === a.type ? ' selected' : '') + '>' + esc(t.label) + '</option>';
     }).join('');
     var typeWeight = w.types[a.type] != null ? plainNum(w.types[a.type]) : '0';
-    var locked = isDefaultEntry(cid, 'assessments', a);
 
     var html = '<div class="entry' + (a.predicted ? ' is-predicted' : '') + (def.categories ? ' has-cats' : '') + '" data-kind="assessment" data-id="' + esc(a.id) + '">';
-    html += '<div class="entry-main">' + nameLine(a, 'Untitled assessment', 'Assessment name', context, locked);
+    html += '<div class="entry-main">' + nameLine(a, 'Untitled assessment', 'Assessment name', context);
     if (def.categories) {
       html += '</div><div class="cats">' + GC.CATEGORY_ORDER.map(function (k) {
         return '<div class="cat-row"><span class="cat" title="' + GC.CATEGORY_LABELS[k] + '">' + k + '</span>' +
-          scoreHtml(k + '.', a.marks[k], context + ' ' + GC.CATEGORY_LABELS[k], locked) +
+          scoreHtml(k + '.', a.marks[k], context + ' ' + GC.CATEGORY_LABELS[k]) +
           '<span class="pct" data-pct="' + k + '"></span></div>';
       }).join('') + '</div>';
     } else {
-      html += scoreHtml('', a, context, locked) + '<span class="pct" data-pct=""></span></div>';
+      html += scoreHtml('', a, context) + '<span class="pct" data-pct=""></span></div>';
     }
     html += '<div class="entry-meta">' +
-      '<select class="type-select" data-field="type" aria-label="' + esc(context) + ' type"' + (locked ? ' disabled' : '') + '>' + options + '</select>' +
+      '<select class="type-select" data-field="type" aria-label="' + esc(context) + ' type">' + options + '</select>' +
       '<label class="weight-field">Weight ' +
       '<input type="text" inputmode="decimal" autocomplete="off" class="blank num small" data-field="weight" value="' + esc(a.weight) + '"' +
       ' placeholder="' + typeWeight + '" aria-label="' + esc(context) + ' weight (blank uses the type weight of ' + typeWeight + ')"></label>' +
-      predictedToggle(a.predicted) + deleteBtn(context, locked) +
+      predictedToggle(a.predicted) + deleteBtn(context) +
       '</div></div>';
     return html;
   }
 
   function cptHtml(cid, e, index) {
     var context = e.name ? e.name : 'CPT mark ' + (index + 1);
-    var locked = isDefaultEntry(cid, 'cpt', e);
     return '<div class="entry' + (e.predicted ? ' is-predicted' : '') + '" data-kind="cpt" data-id="' + esc(e.id) + '">' +
-      '<div class="entry-main">' + nameLine(e, 'Untitled CPT mark', 'CPT mark name', context, locked) +
-      scoreHtml('', e, context, locked) + '<span class="pct" data-pct=""></span></div>' +
-      '<div class="entry-meta">' + predictedToggle(e.predicted) + deleteBtn(context, locked) + '</div></div>';
+      '<div class="entry-main">' + nameLine(e, 'Untitled CPT mark', 'CPT mark name', context) +
+      scoreHtml('', e, context) + '<span class="pct" data-pct=""></span></div>' +
+      '<div class="entry-meta">' + predictedToggle(e.predicted) + deleteBtn(context) + '</div></div>';
   }
 
   function singleHtml(slot, title) {
@@ -975,12 +882,12 @@
       return;
     }
 
-    if (action === 'restore-defaults') {
+    if (action === 'clear-marks') {
       var hasCpt = GC.COURSES[cid].parts.indexOf('cpt') !== -1;
-      if (!confirm('Clear your marks in ' + GC.COURSES[cid].name + '? Every assessment' + (hasCpt ? ' and CPT mark' : '') +
-        ' score is erased and any assessments you added yourself are removed. ' +
+      if (!confirm('Clear your marks in ' + GC.COURSES[cid].name + '? Your assessments' + (hasCpt ? ' and CPT marks' : '') +
+        ' go back to the starting list with blank scores, so any you added or changed are replaced. ' +
         'Your final exam, attendance and weights stay.')) return;
-      restoreDefaults(cid);
+      fillStarters(cid, c);
       save();
       renderAssessments(cid);
       renderCpt(cid);
@@ -1002,7 +909,7 @@
       var entryEl = btn.closest('[data-kind]');
       var kind = entryEl.getAttribute('data-kind');
       var obj = findEntry(cid, entryEl);
-      if (!obj || isDefaultEntry(cid, kind === 'cpt' ? 'cpt' : 'assessments', obj)) return;
+      if (!obj) return;
       var name = obj.name ? '"' + obj.name + '"' : 'this ' + (kind === 'cpt' ? 'CPT mark' : 'assessment');
       if (!confirm('Delete ' + name + '?')) return;
       if (kind === 'cpt') {
@@ -1427,7 +1334,6 @@
       }
       if (!confirm('Replace all marks on this device with the marks in this backup?')) return;
       state = normalizeState({ active: state.active, courses: parsed.courses, customCourses: parsed.customCourses, hidden: parsed.hidden });
-      applyDefaults(state);
       save();
       renderAll();
       toast('Backup imported');
@@ -1438,33 +1344,5 @@
 
   // ----------------------------------------------------------------- start
 
-  function start() {
-    // Returning visitors get told when new defaults show up; first-time visitors don't.
-    var returning = GC.COURSE_ORDER.some(function (cid) {
-      var c = state.courses[cid];
-      return (c.seenDefaults && c.seenDefaults.length) || c.assessments.length;
-    });
-    var newDefaults = {};
-    if (applyDefaults(state, newDefaults)) save();
-    renderAll();
-
-    if (returning) {
-      var addedText = GC.COURSE_ORDER.filter(function (cid) { return newDefaults[cid]; }).map(function (cid) {
-        return newDefaults[cid] + ' in ' + GC.COURSES[cid].shortName;
-      });
-      if (addedText.length) toast('New assessments added: ' + addedText.join(', ') + '. Your marks are unchanged.', 6000);
-    }
-  }
-
-  // Load defaults.js with a unique URL so the browser never uses a stale cached
-  // copy; new defaults then show up on a normal reload. If it fails to load
-  // (e.g. offline), the page still starts with what the person already has.
-  if (window.COURSE_DEFAULTS) {
-    start();
-  } else {
-    var defaultsScript = document.createElement('script');
-    defaultsScript.src = 'defaults.js?v=' + Date.now();
-    defaultsScript.onload = defaultsScript.onerror = start;
-    document.body.appendChild(defaultsScript);
-  }
+  renderAll();
 })();
